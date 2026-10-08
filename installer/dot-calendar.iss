@@ -18,6 +18,7 @@ AppUpdatesURL=https://github.com/7065616b/dot-calendar/releases
 DefaultDirName={localappdata}\Programs\DotCalendar
 DefaultGroupName=Dot Calendar
 UninstallDisplayIcon={app}\dot-calendar.exe
+SetupIconFile=..\resources\app.ico
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 DisableDirPage=yes

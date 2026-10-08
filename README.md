@@ -2,14 +2,14 @@
 
 **Rust로 만든 가벼운 Windows 바탕화면 달력. 메모는 바로 쓰고, 일정 관리는 Your dot과 함께.**
 
-[웹사이트](https://7065616b.github.io/dot-calendar/) · [Windows 다운로드](https://github.com/7065616b/dot-calendar/releases/tag/v0.3.12) · [문제 제보](https://github.com/7065616b/dot-calendar/issues) · [MIT License](LICENSE)
+[웹사이트](https://7065616b.github.io/dot-calendar/) · [Windows 다운로드](https://github.com/7065616b/dot-calendar/releases/tag/v0.3.13) · [문제 제보](https://github.com/7065616b/dot-calendar/issues) · [MIT License](LICENSE)
 
-Windows 10 1703 이상 / Windows 11 **x64**용 공개 미리보기입니다. [설치 파일](https://github.com/7065616b/dot-calendar/releases/download/v0.3.12/dot-calendar-0.3.12-windows-x64-setup.exe)을 실행하면 현재 사용자 계정에 달력과 닷의 로컬 연결이 함께 설치됩니다. 설치 없는 [휴대용 ZIP](https://github.com/7065616b/dot-calendar/releases/download/v0.3.12/dot-calendar-0.3.12-windows-x64-preview.zip)도 제공합니다.
+Windows 10 1703 이상 / Windows 11 **x64**용 공개 미리보기입니다. [설치 파일](https://github.com/7065616b/dot-calendar/releases/download/v0.3.13/dot-calendar-0.3.13-windows-x64-setup.exe)을 실행하면 현재 사용자 계정에 달력과 닷의 로컬 연결이 함께 설치됩니다. 설치 없는 [휴대용 ZIP](https://github.com/7065616b/dot-calendar/releases/download/v0.3.13/dot-calendar-0.3.13-windows-x64-preview.zip)도 제공합니다.
 
 ## 작게 만들고, 필요할 때만 일합니다
 
 - **Rust + Win32 네이티브**: WebView·Electron·Node 런타임 없이 동작합니다.
-- **약 1.01MiB 실행 파일**: v0.3.12 Windows x64 실행 파일은 1,062,912 bytes입니다.
+- **약 1.12MiB 실행 파일**: v0.3.13 Windows x64 실행 파일은 1,172,992 bytes이며 여러 크기의 아이콘을 포함합니다.
 - **이벤트 기반 대기**: 입력, 저장소 변경 신호, 날짜·알림·선택적 동기화 시각을 기다립니다. 달력 갱신용 유휴 폴링이나 애니메이션 루프를 두지 않습니다.
 - **필요한 데이터만 준비**: 반복 일정은 원본을 참조하고, 하루 목록과 전체 메모 창은 요청 시 생성해 닫을 때 해제합니다.
 
@@ -39,7 +39,7 @@ Windows 10 1703 이상 / Windows 11 **x64**용 공개 미리보기입니다. [�
 
 ## Your dot 연결
 
-1. [Windows 설치 파일](https://github.com/7065616b/dot-calendar/releases/download/v0.3.12/dot-calendar-0.3.12-windows-x64-setup.exe)을 실행합니다. 닷의 로컬 연결도 함께 등록됩니다.
+1. [Windows 설치 파일](https://github.com/7065616b/dot-calendar/releases/download/v0.3.13/dot-calendar-0.3.13-windows-x64-setup.exe)을 실행합니다. 닷의 로컬 연결도 함께 등록됩니다.
 2. 앱의 **Dot** 버튼에서 안내 문구를 복사해 Your dot에게 한 번 보냅니다. 연결된 PC와 대화 앱이 온라인이어야 합니다.
 3. 이제 **“오늘 일정 알려줘”**, **“내일 3시 회의 추가해줘”**, **“이거 캘린더에 반영해줘”**처럼 말합니다. 작업 중 구체적인 마감일이 생기면 닷이 **“10월 15일 마감으로 캘린더에 추가할까요?”**라고 제안하고, 수락하면 반영하도록 안내합니다.
 

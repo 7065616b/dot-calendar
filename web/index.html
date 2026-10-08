@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#f7f8f6">
     <meta name="description" content="Rust와 Win32로 만든 가벼운 Windows 바탕화면 달력. 설치 파일로 시작하고, Your dot에 짧게 말해 일정을 관리하세요. v0.3.12에서 일정 100개 기준 전용 메모리 2.60 MiB를 측정했습니다.">
     <title>Dot Calendar — Rust로 가볍게, 바탕화면 달력</title>
-    <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+    <link rel="icon" href="./app-icon.png" type="image/png" sizes="128x128">
     <link rel="stylesheet" href="./styles.css">
     <script src="./app.js" defer></script>
   </head>
@@ -15,7 +15,7 @@
     <header class="site-header">
       <div class="shell header-inner">
         <a class="brand" href="#top" aria-label="Dot Calendar 처음으로">
-          <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
+          <img class="brand-mark" src="./app-icon.png" width="28" height="28" alt="">
           <span>Dot Calendar</span>
         </a>
         <nav class="nav-links" aria-label="주 메뉴">
@@ -24,18 +24,18 @@
           <a href="#start">시작하기</a>
           <a href="https://github.com/7065616b/dot-calendar" target="_blank" rel="noopener noreferrer">GitHub <span aria-hidden="true">↗</span></a>
         </nav>
-        <a class="header-download" href="https://github.com/7065616b/dot-calendar/releases/download/v0.3.12/dot-calendar-0.3.12-windows-x64-setup.exe" download>Windows 설치 <span aria-hidden="true">↓</span></a>
+        <a class="header-download" href="https://github.com/7065616b/dot-calendar/releases/download/v0.3.13/dot-calendar-0.3.13-windows-x64-setup.exe" download>Windows 설치 <span aria-hidden="true">↓</span></a>
       </div>
     </header>
 
     <main id="main">
       <section class="hero shell" id="top" aria-labelledby="hero-title">
         <div class="hero-copy">
-          <span class="eyebrow"><span class="status-dot" aria-hidden="true"></span> RUST · NATIVE WINDOWS · v0.3.12</span>
+          <span class="eyebrow"><span class="status-dot" aria-hidden="true"></span> RUST · NATIVE WINDOWS · v0.3.13</span>
           <h1 id="hero-title">바탕화면에 머물고,<br><em>자원은 가볍게.</em></h1>
           <p class="hero-lead">Rust로 만든 작은 Windows 달력. 바탕화면에서 날짜를 보며 바로 적고, 닷에게 “내일 3시 회의 추가해줘”라고 말해 일정을 관리하세요.</p>
           <div class="hero-actions">
-            <a class="button button-primary" href="https://github.com/7065616b/dot-calendar/releases/download/v0.3.12/dot-calendar-0.3.12-windows-x64-setup.exe" download>
+            <a class="button button-primary" href="https://github.com/7065616b/dot-calendar/releases/download/v0.3.13/dot-calendar-0.3.13-windows-x64-setup.exe" download>
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v3h16v-3"/></svg>
               Windows 설치 파일 다운로드
             </a>
@@ -96,11 +96,11 @@
 
       <section class="section shell dot-section" id="dot" aria-labelledby="dot-title"><div class="dot-copy"><span class="kicker">YOUR DOT + CALENDAR</span><h2 id="dot-title">닷에게 말하면,<br>달력에 이어집니다.</h2><p>설치 후 앱의 <strong>Dot</strong> 버튼에서 안내 문구를 복사해 닷에게 한 번 보내세요. 그다음에는 “내일 3시 회의 추가해줘”, “그 회의 4시로 옮겨줘”, “이거 캘린더에 반영해줘”처럼 짧게 말하면 됩니다.</p><p class="muted-copy">작업 중 분명한 완료 예정일이나 마감일이 나오면 닷이 달력에 넣을지 먼저 묻도록 안내합니다. 연결된 PC와 닷 계정에서 실제 일정 읽기·쓰기 동작은 사용 환경에서 확인해야 합니다.</p><a class="inline-link" href="https://github.com/7065616b/dot-calendar/blob/main/integration/README.md" target="_blank" rel="noopener noreferrer">닷 연결 방법 보기 <span aria-hidden="true">↗</span></a></div><div class="dot-conversation" aria-label="Your dot 활용 예시"><span class="conversation-label">대화 예시</span><div class="chat-bubble chat-user">기획안은 10월 15일에 완성할게</div><div class="chat-bubble chat-dot"><span class="tiny-dot" aria-hidden="true"></span><strong>일정으로 남길까요?</strong><span>10월 15일 마감으로 캘린더에 추가할까요?</span></div><div class="chat-bubble chat-user">응, 추가해줘</div><span class="conversation-foot">예시 화면 · 실제 응답은 연결 환경에 따라 달라집니다.</span></div></section>
 
-      <section class="section shell setup-section" id="start" aria-labelledby="start-title"><div class="section-heading"><span class="kicker">GET STARTED</span><h2 id="start-title">설치하고 바로 시작하세요.</h2><p>Windows용 설치 파일이 달력과 닷의 로컬 연결을 함께 준비합니다.</p></div><ol class="steps"><li><span class="step-index">01</span><div><h3>설치 파일 실행</h3><p>Windows x64 설치 파일을 내려받아 현재 사용자 계정에 설치합니다.</p></div></li><li><span class="step-index">02</span><div><h3>달력에서 바로 메모</h3><p>앱을 열고 날짜를 더블클릭하면 메모를 적을 수 있습니다.</p></div></li><li><span class="step-index">03</span><div><h3>닷과 한 번 연결</h3><p>앱의 Dot 버튼에서 안내 문구를 복사해 Your dot에 보냅니다. 이후에는 평소 말투로 일정을 요청하세요.</p></div></li></ol><div class="download-card"><div><span class="download-card-label">LATEST PREVIEW · v0.3.12</span><h3>Dot Calendar for Windows</h3><p>Windows 10 (1703 이상) / 11 · x64 · 현재 사용자용 설치 파일</p></div><a class="button button-light" href="https://github.com/7065616b/dot-calendar/releases/download/v0.3.12/dot-calendar-0.3.12-windows-x64-setup.exe" download>설치 파일 다운로드 <span aria-hidden="true">↓</span></a></div><p class="release-links"><a href="https://github.com/7065616b/dot-calendar/releases/download/v0.3.12/dot-calendar-0.3.12-windows-x64-preview.zip" download>설치 없는 휴대용 ZIP <span aria-hidden="true">↓</span></a><a href="https://github.com/7065616b/dot-calendar/releases/tag/v0.3.12" target="_blank" rel="noopener noreferrer">릴리스와 파일 확인하기 <span aria-hidden="true">↗</span></a><a href="https://github.com/7065616b/dot-calendar" target="_blank" rel="noopener noreferrer">소스 코드 보기 <span aria-hidden="true">↗</span></a></p></section>
+      <section class="section shell setup-section" id="start" aria-labelledby="start-title"><div class="section-heading"><span class="kicker">GET STARTED</span><h2 id="start-title">설치하고 바로 시작하세요.</h2><p>Windows용 설치 파일이 달력과 닷의 로컬 연결을 함께 준비합니다.</p></div><ol class="steps"><li><span class="step-index">01</span><div><h3>설치 파일 실행</h3><p>Windows x64 설치 파일을 내려받아 현재 사용자 계정에 설치합니다.</p></div></li><li><span class="step-index">02</span><div><h3>달력에서 바로 메모</h3><p>앱을 열고 날짜를 더블클릭하면 메모를 적을 수 있습니다.</p></div></li><li><span class="step-index">03</span><div><h3>닷과 한 번 연결</h3><p>앱의 Dot 버튼에서 안내 문구를 복사해 Your dot에 보냅니다. 이후에는 평소 말투로 일정을 요청하세요.</p></div></li></ol><div class="download-card"><div><span class="download-card-label">LATEST PREVIEW · v0.3.13</span><h3>Dot Calendar for Windows</h3><p>Windows 10 (1703 이상) / 11 · x64 · 현재 사용자용 설치 파일</p></div><a class="button button-light" href="https://github.com/7065616b/dot-calendar/releases/download/v0.3.13/dot-calendar-0.3.13-windows-x64-setup.exe" download>설치 파일 다운로드 <span aria-hidden="true">↓</span></a></div><p class="release-links"><a href="https://github.com/7065616b/dot-calendar/releases/download/v0.3.13/dot-calendar-0.3.13-windows-x64-preview.zip" download>설치 없는 휴대용 ZIP <span aria-hidden="true">↓</span></a><a href="https://github.com/7065616b/dot-calendar/releases/tag/v0.3.13" target="_blank" rel="noopener noreferrer">릴리스와 파일 확인하기 <span aria-hidden="true">↗</span></a><a href="https://github.com/7065616b/dot-calendar" target="_blank" rel="noopener noreferrer">소스 코드 보기 <span aria-hidden="true">↗</span></a></p></section>
 
       <section class="section shell faq-section" aria-labelledby="faq-title"><div class="section-heading"><span class="kicker">GOOD TO KNOW</span><h2 id="faq-title">자주 묻는 내용</h2></div><div class="faq-list"><details><summary>일정 데이터는 어디에 저장되나요?</summary><p>개인 일정과 설정은 실행 파일과 분리된 이 PC의 <code>%LOCALAPPDATA%\DotCalendar</code>에 저장됩니다. 앱에는 백업·복원 기능이 있습니다.</p></details><details><summary>Google Calendar 연결은 필수인가요?</summary><p>아닙니다. 로컬 달력은 Google 연결 없이 사용할 수 있습니다. Google 연동을 선택하면 설정에서 본인의 데스크톱 앱용 OAuth 클라이언트 ID를 직접 입력합니다. 실제 계정 로그인과 여러 PC 왕복 동기화는 현재 미리보기 검증 범위 밖입니다.</p></details><details><summary>새 버전으로 바꾸면 기존 일정은 어떻게 되나요?</summary><p>일정 데이터는 설치 폴더와 분리되어 있습니다. 업데이트 설치 파일을 실행하면 같은 PC의 기존 일정을 계속 읽도록 설계되었습니다. 휴대용 ZIP 사용자는 새 압축을 풀어 실행하세요. 업데이트 전에는 앱의 백업 기능으로 복사본을 남겨 두세요.</p></details><details><summary>Windows가 다운로드 또는 실행 경고를 보여요.</summary><p>현재 공개 서명이 적용되지 않은 미리보기 빌드입니다. 파일 출처와 GitHub 릴리스의 정보를 확인하고 실행 여부를 결정하세요.</p></details></div></section>
     </main>
 
-    <footer class="site-footer"><div class="shell footer-inner"><a class="brand" href="#top"><span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span><span></span></span><span>Dot Calendar</span></a><p>바탕화면에 머무는 작은 달력.</p><div><a href="https://github.com/7065616b/dot-calendar" target="_blank" rel="noopener noreferrer">GitHub</a><a href="https://github.com/7065616b/dot-calendar/releases/tag/v0.3.12" target="_blank" rel="noopener noreferrer">릴리스</a></div></div></footer>
+    <footer class="site-footer"><div class="shell footer-inner"><a class="brand" href="#top"><img class="brand-mark" src="./app-icon.png" width="28" height="28" alt=""><span>Dot Calendar</span></a><p>바탕화면에 머무는 작은 달력.</p><div><a href="https://github.com/7065616b/dot-calendar" target="_blank" rel="noopener noreferrer">GitHub</a><a href="https://github.com/7065616b/dot-calendar/releases/tag/v0.3.13" target="_blank" rel="noopener noreferrer">릴리스</a></div></div></footer>
   </body>
 </html>

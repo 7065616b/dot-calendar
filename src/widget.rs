@@ -28,6 +28,7 @@ use windows_sys::Win32::{
 };
 
 const RELOAD: u32 = WM_APP + 1;
+const APP_ICON_RESOURCE_ID: usize = 101;
 const SYNC_DONE: u32 = WM_APP + 2;
 const TRAY: u32 = WM_APP + 3;
 const REBUILD_WIDGET: u32 = WM_APP + 4;
@@ -1077,7 +1078,7 @@ unsafe fn tray(hwnd: HWND, action: u32, message: Option<&str>) {
     n.uID = 1;
     n.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
     n.uCallbackMessage = TRAY;
-    n.hIcon = LoadIconW(null_mut(), IDI_APPLICATION);
+    n.hIcon = GetClassLongPtrW(hwnd, GCLP_HICON) as HICON;
     let title = w("Dot Calendar");
     n.szTip[..title.len()].copy_from_slice(&title);
     if let Some(message) = message {
@@ -3614,6 +3615,7 @@ pub fn run(open_dot: bool) -> Result<(), String> {
             return Err("달력 실행 잠금을 얻을 수 없습니다.".into());
         }
         let instance = GetModuleHandleW(null());
+        let app_icon = LoadIconW(instance, APP_ICON_RESOURCE_ID as *const u16);
         for (class, proc) in [
             (
                 "DotCalendarController",
@@ -3633,6 +3635,7 @@ pub fn run(open_dot: bool) -> Result<(), String> {
                 style: CS_DBLCLKS,
                 lpfnWndProc: proc,
                 hInstance: instance,
+                hIcon: app_icon,
                 hCursor: LoadCursorW(null_mut(), IDC_ARROW),
                 lpszClassName: name.as_ptr(),
                 ..zeroed()

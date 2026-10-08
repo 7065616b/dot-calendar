@@ -7,6 +7,12 @@ license and notice texts in the preview ZIP's `licenses/` directory, with a
 version and license index. Dot Calendar's own source code is licensed under
 the MIT License in `LICENSE`. Dependencies retain their respective licenses.
 
+The app icon depicts the yellow Your dot character introduced by OpenAI:
+https://openai.com/index/introducing-dots/ . Character and trademark rights
+remain with their respective owners and are not granted by this project's MIT
+source-code license. Dot Calendar is an independent project, not an official
+OpenAI or Apple product.
+
 | Crate | Version | Declared license |
 | --- | --- | --- |
 | `serde` | 1.0.229 | MIT OR Apache-2.0 |

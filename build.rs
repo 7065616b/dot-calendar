@@ -52,12 +52,17 @@ fn run_resource_compiler(
 fn main() {
     println!("cargo:rerun-if-changed=resources/app.rc");
     println!("cargo:rerun-if-changed=resources/app.manifest");
+    println!("cargo:rerun-if-changed=resources/app.ico");
     println!("cargo:rerun-if-env-changed=WINDRES");
     println!("cargo:rerun-if-env-changed=RC");
 
     let directory =
         PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("Cargo manifest directory missing"));
-    for name in ["resources/app.rc", "resources/app.manifest"] {
+    for name in [
+        "resources/app.rc",
+        "resources/app.manifest",
+        "resources/app.ico",
+    ] {
         assert!(
             directory.join(name).is_file(),
             "required Windows resource is missing: {name}"

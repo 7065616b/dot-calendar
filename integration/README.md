@@ -4,7 +4,7 @@
 
 ## 연결하기
 
-1. [Windows 설치 파일](https://github.com/7065616b/dot-calendar/releases/download/v0.3.12/dot-calendar-0.3.12-windows-x64-setup.exe)을 실행합니다. 현재 사용자 계정에 달력과 닷의 로컬 연결이 함께 설치됩니다.
+1. [Windows 설치 파일](https://github.com/7065616b/dot-calendar/releases/download/v0.3.13/dot-calendar-0.3.13-windows-x64-setup.exe)을 실행합니다. 현재 사용자 계정에 달력과 닷의 로컬 연결이 함께 설치됩니다.
 2. 앱의 **Dot** 버튼에서 다음 문구를 복사해 Your dot에 **한 번** 보냅니다.
 
    > 내 기본 캘린더는 연결된 PC의 Dot Calendar야. 앞으로 캘린더 요청은 여기에 반영하고, 작업 중 완료 예정일이나 마감일이 나오면 추가할지 먼저 물어봐. 이 설정을 기억하고 오늘 일정을 확인해줘.
