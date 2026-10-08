@@ -4,7 +4,8 @@ use std::ffi::OsStr;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::os::windows::ffi::OsStrExt;
-use std::path::PathBuf;
+use std::os::windows::fs::MetadataExt;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -15,11 +16,22 @@ use windows_sys::Win32::Storage::FileSystem::{
 use windows_sys::Win32::System::Threading::{
     CreateEventW, CreateMutexW, ReleaseMutex, SetEvent, WaitForSingleObject, INFINITE,
 };
+use windows_sys::Win32::UI::WindowsAndMessaging::{FindWindowW, PostMessageW, WM_APP};
 
 use crate::model::{Date, Event};
 
 const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
+const MAX_ARCHIVE_BYTES: u64 = 64 * 1024;
+const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+pub const STORE_CHANGED: u32 = WM_APP + 1;
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct DeletedEvent {
+    version: u32,
+    sequence: u64,
+    event: Event,
+}
 
 #[derive(PartialEq, serde::Serialize, serde::Deserialize)]
 struct Database {
@@ -323,20 +335,37 @@ impl Store {
         id: &str,
         expected: Option<&Event>,
     ) -> Result<Event, String> {
-        self.with_lock(|store| {
-            let mut db = store.read_database()?;
-            let position =
-                db.events
+        self.delete_event_selected(|events| {
+            let event =
+                events
                     .iter()
-                    .position(|event| event.id == id)
+                    .find(|event| event.id == id)
                     .ok_or(if expected.is_some() {
                         "event changed since it was read"
                     } else {
                         "event not found"
                     })?;
-            if expected.is_some_and(|snapshot| snapshot != &db.events[position]) {
+            if expected.is_some_and(|snapshot| snapshot != event) {
                 return Err("event changed since it was read".into());
             }
+            Ok(event.id.clone())
+        })
+    }
+
+    /// Select and delete from the same locked snapshot so conversational matching cannot race an edit.
+    pub fn delete_event_selected(
+        &self,
+        selector: impl FnOnce(&[Event]) -> Result<String, String>,
+    ) -> Result<Event, String> {
+        self.with_lock(|store| {
+            let mut db = store.read_database()?;
+            let id = selector(&db.events)?;
+            let position = db
+                .events
+                .iter()
+                .position(|event| event.id == id)
+                .ok_or("selected event no longer exists")?;
+            store.archive_event(&db.events[position])?;
             let removed = db.events.remove(position);
             if let Some(request_id) = &removed.request_id {
                 db.retired_request_ids.push(request_id.clone());
@@ -452,6 +481,7 @@ impl Store {
             if db.events[position] != *expected {
                 return Ok(false);
             }
+            store.archive_event(&db.events[position])?;
             let removed = db.events.remove(position);
             if let Some(request_id) = removed.request_id {
                 db.retired_request_ids.push(request_id);
@@ -461,7 +491,60 @@ impl Store {
         })
     }
 
-    /// Export a complete backup, including deleted request IDs used for retry safety.
+    /// Deleted events are read only on demand; the desktop widget loads active rows alone.
+    pub fn list_deleted_events(&self) -> Result<Vec<Event>, String> {
+        self.with_lock(|store| {
+            let active = store.read_database()?;
+            let mut archives = store.read_deleted_events()?;
+            archives.retain(|record| {
+                !active
+                    .events
+                    .iter()
+                    .any(|event| event.id == record.event.id)
+            });
+            archives.sort_unstable_by_key(|record| std::cmp::Reverse(record.sequence));
+            Ok(archives.into_iter().map(|record| record.event).collect())
+        })
+    }
+
+    pub fn restore_deleted_event(&self, id: &str) -> Result<Event, String> {
+        self.with_lock(|store| {
+            let directory = store
+                .checked_deleted_dir(false)?
+                .ok_or("deleted event not found")?;
+            let name = archive_name(id);
+            let path = directory.join(&name);
+            match fs::symlink_metadata(&path) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    return Err("deleted event not found".into());
+                }
+                Err(error) => return Err(format!("cannot inspect deleted event: {error}")),
+                Ok(_) => {}
+            }
+            let record = Self::read_deleted_event_file(&path, &name)?;
+            if record.event.id != id {
+                return Err(
+                    "deleted-event archive filename collision; original was preserved".into(),
+                );
+            }
+            store.restore_archived_event(&record)
+        })
+    }
+
+    pub fn restore_last_deleted(&self) -> Result<Event, String> {
+        self.with_lock(|store| {
+            let db = store.read_database()?;
+            let record = store
+                .read_deleted_events()?
+                .into_iter()
+                .filter(|record| !db.events.iter().any(|event| event.id == record.event.id))
+                .max_by_key(|record| record.sequence)
+                .ok_or("deleted event not found")?;
+            store.restore_archived_event_with_database(&record, db)
+        })
+    }
+
+    /// Export active events and deleted request IDs; the separate deleted-event archive is not included.
     pub fn export_json(&self) -> Result<String, String> {
         self.with_lock(|store| {
             serde_json::to_string_pretty(&store.read_database()?)
@@ -479,6 +562,265 @@ impl Store {
             }
             store.write_database(&db)
         })
+    }
+
+    fn deleted_dir(&self) -> PathBuf {
+        self.path
+            .parent()
+            .expect("calendar has a parent")
+            .join("deleted")
+    }
+
+    fn checked_deleted_dir(&self, create: bool) -> Result<Option<PathBuf>, String> {
+        let path = self.deleted_dir();
+        if create {
+            fs::create_dir_all(&path)
+                .map_err(|error| format!("cannot create deleted-event archive: {error}"))?;
+        }
+        let metadata = match fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) if !create && error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(None);
+            }
+            Err(error) => return Err(format!("cannot inspect deleted-event archive: {error}")),
+        };
+        if !metadata.is_dir() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return Err("deleted-event archive is not a regular directory".into());
+        }
+        Ok(Some(path))
+    }
+
+    fn read_deleted_events(&self) -> Result<Vec<DeletedEvent>, String> {
+        let Some(directory) = self.checked_deleted_dir(false)? else {
+            return Ok(Vec::new());
+        };
+        let mut records = Vec::new();
+        for entry in fs::read_dir(directory)
+            .map_err(|error| format!("cannot list deleted-event archive: {error}"))?
+        {
+            let entry =
+                entry.map_err(|error| format!("cannot list deleted-event archive: {error}"))?;
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else { continue };
+            if !is_archive_name(name) {
+                continue;
+            }
+            records.push(Self::read_deleted_event_file(&entry.path(), name)?);
+        }
+        Ok(records)
+    }
+
+    fn read_deleted_event_file(path: &Path, name: &str) -> Result<DeletedEvent, String> {
+        let metadata = fs::symlink_metadata(path)
+            .map_err(|error| format!("cannot inspect deleted event: {error}"))?;
+        if !metadata.is_file() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return Err("deleted event is not a regular file".into());
+        }
+        if metadata.len() > MAX_ARCHIVE_BYTES {
+            return Err("deleted event exceeds 64 KiB".into());
+        }
+        let mut bytes = Vec::with_capacity(metadata.len() as usize);
+        File::open(path)
+            .map_err(|error| format!("cannot open deleted event: {error}"))?
+            .take(MAX_ARCHIVE_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|error| format!("cannot read deleted event: {error}"))?;
+        if bytes.len() as u64 > MAX_ARCHIVE_BYTES {
+            return Err("deleted event exceeds 64 KiB".into());
+        }
+        let record: DeletedEvent = serde_json::from_slice(&bytes).map_err(|error| {
+            format!("deleted event is malformed and was left unchanged: {error}")
+        })?;
+        if record.version != 1 || record.sequence == 0 || archive_name(&record.event.id) != name {
+            return Err(
+                "deleted event has invalid identity or version; archive was left unchanged".into(),
+            );
+        }
+        validate_event(&record.event)
+            .map_err(|error| format!("deleted event is invalid and was left unchanged: {error}"))?;
+        Ok(record)
+    }
+
+    fn reserve_deleted_sequence(&self, directory: &Path) -> Result<u64, String> {
+        let sequence_path = directory.join("sequence.txt");
+        let previous = match fs::symlink_metadata(&sequence_path) {
+            Ok(metadata) => {
+                if !metadata.is_file()
+                    || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+                    || metadata.len() > 20
+                {
+                    return Err(
+                        "deleted-event sequence file is invalid; event was not deleted".into(),
+                    );
+                }
+                let mut bytes = Vec::with_capacity(metadata.len() as usize);
+                File::open(&sequence_path)
+                    .map_err(|error| format!("cannot open deleted-event sequence: {error}"))?
+                    .take(21)
+                    .read_to_end(&mut bytes)
+                    .map_err(|error| format!("cannot read deleted-event sequence: {error}"))?;
+                if bytes.is_empty() || bytes.len() > 20 || !bytes.iter().all(u8::is_ascii_digit) {
+                    return Err(
+                        "deleted-event sequence file is invalid; event was not deleted".into(),
+                    );
+                }
+                std::str::from_utf8(&bytes)
+                    .ok()
+                    .and_then(|value| value.parse::<u64>().ok())
+                    .ok_or("deleted-event sequence file is invalid; event was not deleted")?
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                // One-time recovery for an archive created before the counter existed.
+                self.read_deleted_events()?
+                    .into_iter()
+                    .map(|record| record.sequence)
+                    .max()
+                    .unwrap_or(0)
+            }
+            Err(error) => return Err(format!("cannot inspect deleted-event sequence: {error}")),
+        };
+        let next = previous
+            .checked_add(1)
+            .ok_or("deleted-event sequence exhausted")?;
+        let temp = directory.join(format!(
+            ".sequence-{}-{}.tmp",
+            std::process::id(),
+            next_number()
+        ));
+        let result = (|| {
+            let mut file = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temp)
+                .map_err(|error| {
+                    format!("cannot create deleted-event sequence temp file: {error}")
+                })?;
+            write!(file, "{next}")
+                .map_err(|error| format!("cannot write deleted-event sequence: {error}"))?;
+            file.sync_all()
+                .map_err(|error| format!("cannot flush deleted-event sequence: {error}"))?;
+            drop(file);
+            let moved = unsafe {
+                MoveFileExW(
+                    wide(temp.as_os_str()).as_ptr(),
+                    wide(sequence_path.as_os_str()).as_ptr(),
+                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+                )
+            };
+            if moved == 0 {
+                return Err(format!(
+                    "cannot save deleted-event sequence; event was not deleted: {}",
+                    std::io::Error::last_os_error()
+                ));
+            }
+            Ok(next)
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(temp);
+        }
+        result
+    }
+
+    fn archive_event(&self, event: &Event) -> Result<(), String> {
+        let directory = self
+            .checked_deleted_dir(true)?
+            .expect("archive directory was created");
+        let name = archive_name(&event.id);
+        let destination = directory.join(&name);
+        match fs::symlink_metadata(&destination) {
+            Ok(_) => {
+                if Self::read_deleted_event_file(&destination, &name)?.event.id != event.id {
+                    return Err(
+                        "deleted-event archive filename collision; event was not deleted".into(),
+                    );
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(format!("cannot inspect prior deleted event: {error}")),
+        }
+        let sequence = self.reserve_deleted_sequence(&directory)?;
+        let record = DeletedEvent {
+            version: 1,
+            sequence,
+            event: event.clone(),
+        };
+        let bytes = serde_json::to_vec(&record)
+            .map_err(|error| format!("cannot encode deleted event: {error}"))?;
+        if bytes.len() as u64 > MAX_ARCHIVE_BYTES {
+            return Err("deleted event exceeds 64 KiB; event was not deleted".into());
+        }
+        let temp = directory.join(format!(
+            ".deleted-{}-{}.tmp",
+            std::process::id(),
+            next_number()
+        ));
+        let result = (|| {
+            let mut file = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temp)
+                .map_err(|error| format!("cannot create deleted-event temp file: {error}"))?;
+            file.write_all(&bytes)
+                .map_err(|error| format!("cannot write deleted event: {error}"))?;
+            file.sync_all()
+                .map_err(|error| format!("cannot flush deleted event: {error}"))?;
+            drop(file);
+            let moved = unsafe {
+                MoveFileExW(
+                    wide(temp.as_os_str()).as_ptr(),
+                    wide(destination.as_os_str()).as_ptr(),
+                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+                )
+            };
+            if moved == 0 {
+                return Err(format!(
+                    "cannot save deleted event; event was not deleted: {}",
+                    std::io::Error::last_os_error()
+                ));
+            }
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(temp);
+        }
+        result
+    }
+
+    fn restore_archived_event(&self, record: &DeletedEvent) -> Result<Event, String> {
+        self.restore_archived_event_with_database(record, self.read_database()?)
+    }
+
+    fn restore_archived_event_with_database(
+        &self,
+        record: &DeletedEvent,
+        mut db: Database,
+    ) -> Result<Event, String> {
+        let event = &record.event;
+        if db.events.iter().any(|active| active.id == event.id) {
+            return Err("event ID is already active; deleted copy was preserved".into());
+        }
+        if event.request_id.as_ref().is_some_and(|request_id| {
+            db.events
+                .iter()
+                .any(|active| active.request_id.as_ref() == Some(request_id))
+        }) {
+            return Err("request-id is already active; deleted copy was preserved".into());
+        }
+        if let Some(request_id) = &event.request_id {
+            if let Some(position) = db
+                .retired_request_ids
+                .iter()
+                .position(|id| id == request_id)
+            {
+                db.retired_request_ids.remove(position);
+            }
+        }
+        db.events.push(event.clone());
+        self.write_database(&db)?;
+        // The live row is durable now. If archive cleanup fails, filtering active IDs hides
+        // the stale copy; a later deletion of the same ID safely replaces it.
+        let _ = fs::remove_file(self.deleted_dir().join(archive_name(&event.id)));
+        Ok(event.clone())
     }
 
     fn with_lock<T>(&self, action: impl FnOnce(&Self) -> Result<T, String>) -> Result<T, String> {
@@ -620,7 +962,18 @@ impl Store {
             let _ = fs::remove_file(&temp);
         } else {
             // A failed notification does not turn a successful durable write into a retryable error.
-            unsafe { SetEvent(self.changed) };
+            unsafe {
+                SetEvent(self.changed);
+                // The UI may be in a modal dialog or dragging a window, when its normal
+                // wait loop is not running. A queued message reaches that same UI thread.
+                let controller = FindWindowW(
+                    wide(OsStr::new("DotCalendarController")).as_ptr(),
+                    wide(OsStr::new(&self.event_name)).as_ptr(),
+                );
+                if !controller.is_null() {
+                    PostMessageW(controller, STORE_CHANGED, 0, 0);
+                }
+            }
         }
         result
     }
@@ -715,6 +1068,22 @@ fn validate_event(event: &Event) -> Result<(), String> {
 
 fn next_number() -> u64 {
     NEXT_ID.fetch_add(1, Ordering::Relaxed)
+}
+
+fn archive_name(id: &str) -> String {
+    let hash = id.bytes().fold(
+        144066263297769815596495629667062367629_u128,
+        |hash, byte| (hash ^ u128::from(byte)).wrapping_mul(309485009821345068724781371_u128),
+    );
+    format!("t-{hash:032x}.json")
+}
+
+fn is_archive_name(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    bytes.len() == 39
+        && bytes.starts_with(b"t-")
+        && bytes.ends_with(b".json")
+        && bytes[2..34].iter().all(u8::is_ascii_hexdigit)
 }
 
 fn unique_id(db: &Database) -> String {
@@ -828,6 +1197,225 @@ mod tests {
             Some("req-1")
         )
         .is_err());
+        let _ = fs::remove_dir_all(store.path.parent().unwrap());
+    }
+
+    #[test]
+    fn deleted_event_survives_reopen_and_restores_exact_details() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let store = test_store();
+        let created = store
+            .create_event_with_details(
+                "2026-10-15",
+                Some("08:30"),
+                "복구할 일정",
+                "전체 메모\n둘째 줄",
+                Some("restore-original"),
+                true,
+                Some("#83AACD"),
+                Some("weekly"),
+                Some(15),
+            )
+            .unwrap();
+        assert_eq!(store.delete_event(&created.id).unwrap(), created);
+        assert!(store.list_events(None).unwrap().is_empty());
+        let reopened = Store::open_at(store.path.clone()).unwrap();
+        assert_eq!(
+            reopened.list_deleted_events().unwrap(),
+            vec![created.clone()]
+        );
+        assert_eq!(
+            reopened.restore_deleted_event(&created.id).unwrap(),
+            created
+        );
+        assert_eq!(reopened.list_events(None).unwrap(), vec![created.clone()]);
+        assert!(reopened.list_deleted_events().unwrap().is_empty());
+        assert_eq!(
+            create_basic_event(
+                &reopened,
+                &created.date,
+                created.time.as_deref(),
+                &created.title,
+                &created.notes,
+                created.request_id.as_deref()
+            )
+            .unwrap_err(),
+            "request-id already belongs to a different event payload"
+        );
+        let _ = fs::remove_dir_all(store.path.parent().unwrap());
+    }
+
+    #[test]
+    fn restore_last_deleted_keeps_order_and_other_retired_requests() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let store = test_store();
+        let first =
+            create_basic_event(&store, "2026-10-08", None, "First", "", Some("first-r")).unwrap();
+        let second =
+            create_basic_event(&store, "2026-10-09", None, "Second", "", Some("second-r")).unwrap();
+        assert!(store.delete_if_unchanged(&first).unwrap());
+        store.delete_event(&second.id).unwrap();
+        assert_eq!(
+            store.list_deleted_events().unwrap(),
+            vec![second.clone(), first.clone()]
+        );
+        assert_eq!(store.restore_last_deleted().unwrap(), second);
+        assert!(
+            create_basic_event(&store, "2026-10-08", None, "Other", "", Some("first-r")).is_err()
+        );
+        assert_eq!(store.restore_last_deleted().unwrap(), first);
+        assert!(store.list_deleted_events().unwrap().is_empty());
+        let _ = fs::remove_dir_all(store.path.parent().unwrap());
+    }
+
+    #[test]
+    fn failed_archive_and_stale_delete_leave_active_event_untouched() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let store = test_store();
+        let original = create_basic_event(&store, "2026-10-08", None, "Keep", "", None).unwrap();
+        let changed = store
+            .update_event_with_details(
+                &original.id,
+                "2026-10-08",
+                None,
+                "Keep",
+                "edited",
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        assert!(store
+            .delete_event_expected(&original.id, Some(&original))
+            .is_err());
+        assert!(!store.delete_if_unchanged(&original).unwrap());
+        assert!(store.list_deleted_events().unwrap().is_empty());
+        fs::write(store.deleted_dir(), b"not a directory").unwrap();
+        assert!(store.delete_event(&changed.id).is_err());
+        assert!(store.delete_if_unchanged(&changed).is_err());
+        assert_eq!(store.list_events(None).unwrap(), vec![changed]);
+        let _ = fs::remove_dir_all(store.path.parent().unwrap());
+    }
+
+    #[test]
+    fn restore_collision_preserves_archived_event() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let store = test_store();
+        let original = create_basic_event(
+            &store,
+            "2026-10-08",
+            None,
+            "Original",
+            "",
+            Some("collision-r"),
+        )
+        .unwrap();
+        let backup = store.export_json().unwrap();
+        store.delete_event(&original.id).unwrap();
+        store.restore_json(&backup).unwrap();
+        assert!(store.restore_deleted_event(&original.id).is_err());
+        assert_eq!(store.list_events(None).unwrap(), vec![original.clone()]);
+        assert!(store
+            .deleted_dir()
+            .join(archive_name(&original.id))
+            .exists());
+        let _ = fs::remove_dir_all(store.path.parent().unwrap());
+    }
+
+    #[test]
+    fn restore_size_failure_preserves_archived_event() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let store = test_store();
+        let original =
+            create_basic_event(&store, "2026-10-08", None, "Archived", "", Some("size-r")).unwrap();
+        store.delete_event(&original.id).unwrap();
+        let archive = store.deleted_dir().join(archive_name(&original.id));
+        let before = fs::read(&archive).unwrap();
+
+        let mut db = store.read_database().unwrap();
+        let mut filler = original.clone();
+        filler.id = "f".into();
+        filler.request_id = None;
+        db.events.push(filler);
+        let base_size = serde_json::to_vec_pretty(&db).unwrap().len();
+        db.events[0].id = "f".repeat(MAX_FILE_BYTES as usize - base_size - 31);
+        store.write_database(&db).unwrap();
+
+        assert!(store.restore_deleted_event(&original.id).is_err());
+        assert_eq!(fs::read(&archive).unwrap(), before);
+        assert_eq!(store.list_deleted_events().unwrap(), vec![original]);
+        let _ = fs::remove_dir_all(store.path.parent().unwrap());
+    }
+
+    #[test]
+    fn selected_delete_uses_locked_snapshot_and_does_not_write_on_selection_error() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let store = test_store();
+        let first = create_basic_event(&store, "2026-10-08", None, "Keep", "", None).unwrap();
+        let second = create_basic_event(&store, "2026-10-09", None, "Delete", "", None).unwrap();
+        let before = fs::read(&store.path).unwrap();
+        assert_eq!(
+            store
+                .delete_event_selected(|events| {
+                    assert_eq!(events.len(), 2);
+                    Err("ambiguous selection".into())
+                })
+                .unwrap_err(),
+            "ambiguous selection"
+        );
+        assert!(store
+            .delete_event_selected(|_| Ok("missing".into()))
+            .is_err());
+        assert_eq!(fs::read(&store.path).unwrap(), before);
+        assert!(!store.deleted_dir().exists());
+        assert_eq!(
+            store
+                .delete_event_selected(|events| {
+                    Ok(events
+                        .iter()
+                        .find(|event| event.title == "Delete")
+                        .unwrap()
+                        .id
+                        .clone())
+                })
+                .unwrap(),
+            second
+        );
+        assert_eq!(store.list_events(None).unwrap(), vec![first]);
+        assert_eq!(store.list_deleted_events().unwrap(), vec![second]);
+        let _ = fs::remove_dir_all(store.path.parent().unwrap());
+    }
+
+    #[test]
+    fn delete_sequence_persists_without_scanning_other_archived_bodies() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let store = test_store();
+        let first = create_basic_event(&store, "2026-10-08", None, "First", "", None).unwrap();
+        store.delete_event(&first.id).unwrap();
+        let first_sequence = store.read_deleted_events().unwrap()[0].sequence;
+        assert_eq!(first_sequence, 1);
+
+        let broken = store.deleted_dir().join(archive_name("unrelated-broken"));
+        fs::write(&broken, b"{broken").unwrap();
+        let reopened = Store::open_at(store.path.clone()).unwrap();
+        let second = create_basic_event(&reopened, "2026-10-09", None, "Second", "", None).unwrap();
+        reopened.delete_event(&second.id).unwrap();
+        assert_eq!(
+            fs::read_to_string(store.deleted_dir().join("sequence.txt")).unwrap(),
+            "2"
+        );
+        assert_eq!(reopened.restore_deleted_event(&first.id).unwrap(), first);
+        fs::remove_file(broken).unwrap();
+        assert_eq!(
+            reopened
+                .read_deleted_events()
+                .unwrap()
+                .iter()
+                .map(|item| item.sequence)
+                .max(),
+            Some(2)
+        );
         let _ = fs::remove_dir_all(store.path.parent().unwrap());
     }
 

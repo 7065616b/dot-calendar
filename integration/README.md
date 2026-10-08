@@ -1,10 +1,10 @@
 # Dot Calendar와 Your dot 연결
 
-바탕화면 달력과 닷은 이 PC의 같은 일정 파일을 사용합니다. 설치 후 닷에게 짧게 말해 일정을 찾거나 바꿀 수 있도록 준비했습니다. 로컬 도구 검사는 통과했으며, 실제 Your dot 계정 대화에서의 호출은 별도 확인이 필요합니다.
+바탕화면 달력과 닷은 이 PC의 같은 일정 파일을 사용합니다. 설치 후 닷에게 짧게 말해 일정을 찾거나 바꿀 수 있도록 준비했습니다. 로컬 도구 검사를 통과했고, 이 PC의 Your dot 대화에서 오늘 일정 읽기를 확인했습니다. 새 삭제·복구 등 계정 대화 경유 쓰기는 사용 환경에서 별도 확인이 필요합니다.
 
 ## 연결하기
 
-1. [Windows 설치 파일](https://github.com/7065616b/dot-calendar/releases/download/v0.3.13/dot-calendar-0.3.13-windows-x64-setup.exe)을 실행합니다. 현재 사용자 계정에 달력과 닷의 로컬 연결이 함께 설치됩니다.
+1. [Windows 설치 파일](https://github.com/7065616b/dot-calendar/releases/download/v0.3.14/dot-calendar-0.3.14-windows-x64-setup.exe)을 실행합니다. 현재 사용자 계정에 달력과 닷의 로컬 연결이 함께 설치됩니다.
 2. 앱의 **Dot** 버튼에서 다음 문구를 복사해 Your dot에 **한 번** 보냅니다.
 
    > 내 기본 캘린더는 연결된 PC의 Dot Calendar야. 앞으로 캘린더 요청은 여기에 반영하고, 작업 중 완료 예정일이나 마감일이 나오면 추가할지 먼저 물어봐. 이 설정을 기억하고 오늘 일정을 확인해줘.
@@ -17,7 +17,7 @@ Your dot의 Computers에서 이 PC 접근을 허용하고 PC와 ChatGPT 앱을 �
 
 ## 연결 방식과 직접 설치
 
-위젯과 닷 전용 스킬은 같은 Windows 일정 파일을 사용합니다. 스킬은 요청할 때만 Rust MCP 프로세스를 실행하고 종료하며 별도의 상주 서버는 추가하지 않습니다. 명확한 요청은 저장 후 다시 조회해 검증하고, 중복 가능성이 있는 재시도에는 같은 요청 ID를 사용합니다. Google의 실제 원격 반영 여부는 로컬 저장과 별개입니다.
+위젯과 닷 전용 스킬은 같은 Windows 일정 파일을 사용합니다. 스킬은 요청할 때만 Rust MCP 프로세스를 실행하고 종료하며 별도의 상주 서버는 추가하지 않습니다. 날짜와 정확한 제목으로 삭제 대상을 하나로 특정할 수 있으면 한 도구 호출에서 선택·보관·삭제·결과 확인을 처리합니다. 대상이 여러 개면 삭제하지 않고 시각이나 ID를 확인합니다. 이는 로컬 도구 왕복을 줄이지만 닷 대화·연결 과정 전체의 소요 시간까지 보장하지는 않습니다. 생성 요청은 저장 후 다시 조회해 검증하고, 중복 가능성이 있는 재시도에는 같은 요청 ID를 사용합니다. Google의 실제 원격 반영 여부는 로컬 저장과 별개입니다.
 
 개발 저장소에서는 `dist/dot-calendar.exe`를 빌드한 뒤 PowerShell에서 `./scripts/install-dot-skill.ps1`을 직접 실행할 수도 있습니다. 실행 정책이 차단하는 경우 검토한 스크립트에 한해 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-dot-skill.ps1`을 사용하고 영구 실행 정책은 바꾸지 않습니다.
 
@@ -39,7 +39,9 @@ list는 저장된 시리즈를 조회합니다. 반복 날짜를 포함하려면
 
 생성 요청의 --request-id는 같은 요청의 재시도에 재사용하세요. 입력이 동일하면 기존 일정이 반환됩니다. 다른 내용에 같은 ID를 쓰거나 삭제한 ID를 재사용하면 오류가 납니다. 명령은 성공 결과를 JSON 표준 출력, 오류를 표준 오류와 0이 아닌 종료 코드로 전달합니다.
 
-백업은 다음처럼 만들 수 있습니다. 복원은 현재 일정을 전체 교체하므로 앱 메뉴에서는 확인과 복원 전 자동 백업을 거칩니다.
+로컬 일정 삭제 시 원본이 데이터 폴더의 `deleted/`에 보관됩니다. 앱의 ··· 메뉴에는 **마지막 삭제 되돌리기**가 있고, MCP의 `calendar_deleted`와 `calendar_restore`로 보관 항목 조회·특정 ID 복구가 가능합니다. 복구는 기존 활성 일정과 충돌하면 중단됩니다. 반복 일정 삭제는 시리즈 전체에 적용되며, Google에 반영된 삭제의 원격 복구는 보장하지 않습니다.
+
+백업은 다음처럼 만들 수 있습니다. 복원은 현재 일정을 전체 교체하므로 앱 메뉴에서는 확인과 복원 전 자동 백업을 거칩니다. 내보낸 JSON은 활성 달력 데이터이며 `deleted/` 보관함은 포함하지 않습니다.
 
     & $app backup-export --file .\calendar-backup.json
     & $app backup-restore --file .\calendar-backup.json
@@ -57,7 +59,7 @@ list는 저장된 시리즈를 조회합니다. 반복 날짜를 포함하려면
       }
     }
 
-서버는 다음 7개 도구를 제공합니다.
+서버는 다음 9개 도구를 제공합니다.
 
 | 도구 | 기능 |
 | --- | --- |
@@ -67,9 +69,11 @@ list는 저장된 시리즈를 조회합니다. 반복 날짜를 포함하려면
 | calendar_create | request_id를 사용하는 일정 생성 |
 | calendar_update | 날짜·시각·제목·메모 및 선택한 세부 설정 변경 |
 | calendar_set_details | 완료·색·반복·알림 설정 변경 |
-| calendar_delete | 일정 삭제 |
+| calendar_delete | ID와 원본 `expected`, 또는 정확한 발생 날짜·제목(선택적으로 시각)으로 일정을 한 번에 선택·보관·삭제·확인. 여러 건이 맞으면 삭제 중단 |
+| calendar_deleted | 복구 가능한 로컬 삭제 일정 조회. 최근 삭제순 |
+| calendar_restore | 원본 ID로 특정 삭제 일정을 복구하거나, ID를 생략해 최근 삭제를 되돌림 |
 
-calendar_today는 `{date, events:[{source, event}]}`를 반환합니다. 각 `event`는 발생일로 바꾸지 않은 원본 전체이며, `source`는 `local` 또는 `google`입니다. `include_completed: true`를 보내면 완료 항목도 나옵니다. 달력의 구글 표시를 끄면 가져온 구글 일정은 이 조회에서도 숨겨집니다. calendar_create의 request_id는 필수입니다. calendar_update의 세부 설정을 생략하면 기존 값이 유지되고, 색·반복·알림에 null을 전달하면 해당 값이 지워집니다. 수정·세부 설정·삭제에는 `calendar_today`의 `event` 또는 `calendar_list`에서 읽은 원본 Event 전체를 `expected`로 보내면 동시 변경 시 덮어쓰기 없이 오류가 반환됩니다. 닷 스킬은 이 비교를 사용합니다. calendar_occurrences의 날짜는 발생일로 바뀌므로 expected에는 사용하지 않습니다. 서버는 표준 출력을 MCP 응답에만 사용합니다.
+calendar_today는 `{date, events:[{source, event}]}`를 반환합니다. 각 `event`는 발생일로 바꾸지 않은 원본 전체이며, `source`는 `local` 또는 `google`입니다. `include_completed: true`를 보내면 완료 항목도 나옵니다. 달력의 구글 표시를 끄면 가져온 구글 일정은 이 조회에서도 숨겨집니다. calendar_create의 request_id는 필수입니다. calendar_update의 세부 설정을 생략하면 기존 값이 유지되고, 색·반복·알림에 null을 전달하면 해당 값이 지워집니다. 수정·세부 설정·ID 기반 삭제에는 `calendar_today`의 `event` 또는 `calendar_list`에서 읽은 원본 Event 전체를 `expected`로 보내면 동시 변경 시 덮어쓰기 없이 오류가 반환됩니다. 날짜·제목 기반 `calendar_delete`는 정확히 한 대상만 일치할 때만 삭제하고, 반복 일정에는 `series: true`가 필요합니다. `calendar_restore`에서 ID를 생략하면 그 시점의 최근 삭제가 복구되므로 응답이 불확실할 때 무작정 재시도하지 마세요. calendar_occurrences의 날짜는 발생일로 바뀌므로 expected에는 사용하지 않습니다. 서버는 표준 출력을 MCP 응답에만 사용합니다.
 
 로컬 stdio MCP 설정만으로 ChatGPT 계정에 서버가 연결되지는 않습니다. [OpenAI 사용자 지정 MCP 안내](https://developers.openai.com/api/docs/guides/custom-mcp-server)는 공개 HTTPS 연결 또는 [Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels)을 설명합니다. 현재 저장소는 계정 연결이나 터널을 자동 설정하지 않습니다.
 

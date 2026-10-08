@@ -17,6 +17,13 @@ function Assert-True([bool] $Condition, [string] $Message) {
     if (-not $Condition) { throw $Message }
 }
 
+function Assert-Rejected([string] $Tool, [hashtable] $Arguments, [string] $ExpectedText) {
+    $failure = ''
+    try { [void](Call-Calendar $Tool $Arguments) }
+    catch { $failure = $_.Exception.Message }
+    Assert-True ($failure.Contains($ExpectedText)) "$Tool should reject this request with '$ExpectedText'; got '$failure'."
+}
+
 try {
     $date = '2099-12-01'
     $title = '한글 "따옴표" ''작업'' & | ; $() ` \ 끝'
@@ -63,6 +70,53 @@ try {
     Assert-True ($deleted.id -eq $created.id) 'Delete returned the wrong event.'
     $after = Call-Calendar 'calendar_list' @{ date = $date } | ConvertFrom-Json -AsHashtable -NoEnumerate
     Assert-True ($after.Count -eq 0) 'Deleted event remains readable.'
+    $archived = Call-Calendar 'calendar_deleted' @{} | ConvertFrom-Json -AsHashtable -NoEnumerate
+    Assert-True ($archived.Count -eq 1 -and $archived[0].id -eq $deleted.id -and $archived[0].notes -eq $notes) 'Deleted event was not durably archived with its notes.'
+    Assert-True (Test-Path -LiteralPath (Join-Path $dataDir 'deleted') -PathType Container) 'Deleted-event archive directory is missing.'
+    $restored = Call-Calendar 'calendar_restore' @{ id = $deleted.id } | ConvertFrom-Json -AsHashtable
+    Assert-True ($restored.id -eq $deleted.id -and $restored.title -eq $newTitle -and $restored.notes -eq $notes -and $restored.request_id -eq $requestId -and $restored.recurrence -eq 'weekly' -and $null -eq $restored.time) 'Restore lost the original event ID or fields.'
+    $afterRestore = Call-Calendar 'calendar_list' @{ date = $date } | ConvertFrom-Json -AsHashtable -NoEnumerate
+    Assert-True ($afterRestore.Count -eq 1 -and $afterRestore[0].id -eq $created.id) 'Restored event did not reappear in a fresh process.'
+    $archiveAfterRestore = Call-Calendar 'calendar_deleted' @{} | ConvertFrom-Json -AsHashtable -NoEnumerate
+    Assert-True ($archiveAfterRestore.Count -eq 0) 'Restored event remains in recoverable deletion list.'
+
+    $exactDate = '2099-12-15'
+    $exact = Call-Calendar 'calendar_create' @{ date = $exactDate; title = '날짜 제목 바로 삭제'; notes = '복구할 상세 메모'; request_id = [guid]::NewGuid().ToString('N') } | ConvertFrom-Json -AsHashtable
+    $exactDeleted = Call-Calendar 'calendar_delete' @{ date = $exactDate; title = '날짜 제목 바로 삭제' } | ConvertFrom-Json -AsHashtable
+    Assert-True ($exactDeleted.id -eq $exact.id) 'Exact date/title selector deleted the wrong event.'
+    $exactGone = Call-Calendar 'calendar_list' @{ date = $exactDate } | ConvertFrom-Json -AsHashtable -NoEnumerate
+    Assert-True ($exactGone.Count -eq 0) 'Exact date/title deletion did not persist.'
+    $exactRecovered = Call-Calendar 'calendar_restore' @{ id = $exact.id } | ConvertFrom-Json -AsHashtable
+    Assert-True ($exactRecovered.id -eq $exact.id -and $exactRecovered.notes -eq '복구할 상세 메모' -and $exactRecovered.request_id -eq $exact.request_id) 'Exact-match deleted event did not restore faithfully.'
+
+    $ambiguousDate = '2099-12-16'
+    $first = Call-Calendar 'calendar_create' @{ date = $ambiguousDate; time = '09:00'; title = '중복 제목'; request_id = [guid]::NewGuid().ToString('N') } | ConvertFrom-Json -AsHashtable
+    $second = Call-Calendar 'calendar_create' @{ date = $ambiguousDate; time = '10:00'; title = '중복 제목'; request_id = [guid]::NewGuid().ToString('N') } | ConvertFrom-Json -AsHashtable
+    Assert-Rejected 'calendar_delete' @{ date = $ambiguousDate; title = '중복 제목' } 'multiple events match'
+    $stillThere = Call-Calendar 'calendar_list' @{ date = $ambiguousDate } | ConvertFrom-Json -AsHashtable -NoEnumerate
+    Assert-True ($stillThere.Count -eq 2) 'Ambiguous selector removed an event.'
+    $timedDelete = Call-Calendar 'calendar_delete' @{ date = $ambiguousDate; title = '중복 제목'; time = '09:00' } | ConvertFrom-Json -AsHashtable
+    Assert-True ($timedDelete.id -eq $first.id) 'Time disambiguation deleted the wrong event.'
+    $oneLeft = Call-Calendar 'calendar_list' @{ date = $ambiguousDate } | ConvertFrom-Json -AsHashtable -NoEnumerate
+    Assert-True ($oneLeft.Count -eq 1 -and $oneLeft[0].id -eq $second.id) 'Time disambiguation failed to preserve the other event.'
+
+    $occurrenceDate = '2099-12-08'
+    Assert-Rejected 'calendar_delete' @{ date = $occurrenceDate; title = $newTitle } 'requires series: true'
+    $seriesStillThere = Call-Calendar 'calendar_list' @{ date = $date } | ConvertFrom-Json -AsHashtable -NoEnumerate
+    Assert-True ($seriesStillThere.Count -eq 1 -and $seriesStillThere[0].id -eq $created.id) 'Recurring guard removed the series.'
+    $seriesDeleted = Call-Calendar 'calendar_delete' @{ date = $occurrenceDate; title = $newTitle; series = $true } | ConvertFrom-Json -AsHashtable
+    Assert-True ($seriesDeleted.id -eq $created.id -and $seriesDeleted.date -eq $date) 'Recurring selector did not delete the original series.'
+    $seriesRestored = Call-Calendar 'calendar_restore' @{ id = $created.id } | ConvertFrom-Json -AsHashtable
+    Assert-True ($seriesRestored.id -eq $created.id -and $seriesRestored.recurrence -eq 'weekly') 'Recurring series restore lost recurrence.'
+
+    $staleDate = '2099-12-17'
+    $original = Call-Calendar 'calendar_create' @{ date = $staleDate; title = '동시 편집 전'; request_id = [guid]::NewGuid().ToString('N') } | ConvertFrom-Json -AsHashtable
+    $changed = Call-Calendar 'calendar_update' @{ id = $original.id; date = $staleDate; title = '동시 편집 후' } | ConvertFrom-Json -AsHashtable
+    Assert-Rejected 'calendar_delete' @{ id = $original.id; expected = $original } 'event changed since it was read'
+    Assert-Rejected 'calendar_delete' @{ id = $original.id; date = $staleDate; title = '동시 편집 후' } 'Unexpected field: date'
+    $unchanged = Call-Calendar 'calendar_list' @{ date = $staleDate } | ConvertFrom-Json -AsHashtable -NoEnumerate
+    Assert-True ($unchanged.Count -eq 1 -and $unchanged[0].id -eq $changed.id -and $unchanged[0].title -eq '동시 편집 후') 'Rejected stale or mixed-argument deletion changed data.'
+    Write-Output 'PASS exact delete, ambiguity/time guards, series guard, stale snapshot, and durable undo'
 
     $rejected = $false
     try {

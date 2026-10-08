@@ -6,6 +6,7 @@
 *.log
 **/connection.json
 **/calendar.json
+**/deleted/
 **/widget.json
 **/google-config.json
 **/google-sync-*.json

@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory)]
-    [ValidateSet('calendar_today', 'calendar_list', 'calendar_occurrences', 'calendar_create', 'calendar_update', 'calendar_set_details', 'calendar_delete')]
+    [ValidateSet('calendar_today', 'calendar_list', 'calendar_occurrences', 'calendar_create', 'calendar_update', 'calendar_set_details', 'calendar_delete', 'calendar_deleted', 'calendar_restore')]
     [string] $Tool,
     [string] $ArgumentsJson = '{}',
     [string] $ArgumentsFile,

@@ -7,6 +7,21 @@ description: Manage the Windows desktop Dot Calendar in ordinary conversation. U
 
 Use the connected Windows PC and the bundled `scripts/invoke-calendar.ps1`. The installer writes this skill's `connection.json` with the executable and calendar data directory for that PC. Do not guess paths, silently switch data directories, or edit `calendar.json` directly. This is a local integration; the connected PC and ChatGPT app must be available.
 
+## Execute before confirming completion
+
+For ordinary lookup, creation, update, delete and undo, use one direct local tool execution whenever the target is already clear. Do not turn a single calendar operation into planning, research, extra worker delegation, scheduled work or repeated status polling. If the host must delegate to the connected PC, pass the complete operation and context to that one local worker. Follow the host's required approval rules.
+
+Do the operation before replying with completion; "알겠어요" is only acknowledgement and must not imply that the calendar changed. The MCP server re-reads saved data before returning success for writes. Treat a successful helper response as the verified local result; do not add another assistant/tool round trip solely for read-back. Never promise instant execution or Google sync completion.
+
+For a clear deletion with a known occurrence date and exact title, use `calendar_delete` with `{date, title}` (optional `time`) directly. It finds a unique match, guards against concurrent edits, archives it durably, deletes it and verifies absence in the same invocation. Multiple matches or no match produce an error without deleting anything; then clarify or read IDs. If the conversation already provides an original event snapshot, use `{id, expected}`. A recurring date/title match requires `series: true` only when the user intends the entire series; otherwise explain that one-occurrence deletion is unsupported.
+
+Deletion now keeps a local recovery copy. `calendar_restore` with `{}` undoes the most recent deletion; use `{id}` for a specific deleted event and `calendar_deleted` to find it. The app also exposes **··· → 마지막 삭제 되돌리기**. Recovery preserves the original event; it does not overwrite an active collision. These recovery tools do not establish that a Google-side deletion can be undone. Do not send a second confirmation request merely because older versions described local deletion as permanent; apply the current operation semantics and the host's actual rules.
+
+```powershell
+$argsJson = @{ date = '2026-12-25'; title = '크리스마스 일정' } | ConvertTo-Json -Compress
+& '<this skill directory>\scripts\invoke-calendar.ps1' -Tool calendar_delete -ArgumentsJson $argsJson
+```
+
 ## Talk like a calendar assistant
 
 - Treat plain Korean requests to put something "on the calendar", "in the desktop calendar", or "in Dot" as requests for this calendar when the user has chosen Dot Calendar and has not named another service. Never require the user to say the skill name, tool name, connected PC, or a long setup phrase in each request.
@@ -39,14 +54,18 @@ If local execution requires host approval, use the host's normal approval flow. 
 | `calendar_create` | Required `date`, `title`, `request_id`; optional `time`, `notes`, `completed`, `color`, `recurrence`, `reminder_minutes` |
 | `calendar_update` | Required `id`, `date`, `title`; include existing non-null `time` and `notes` unless intentionally clearing them; optional detail fields otherwise remain unchanged; send `expected` as described below |
 | `calendar_set_details` | Required `id`; provide only changed `completed`, `color`, `recurrence`, `reminder_minutes`, plus `expected` |
-| `calendar_delete` | `id` and `expected` |
+| `calendar_delete` | `id` and `expected`, OR exact `date`, `title`, optional `time`; recurring selector needs `series: true` |
+| `calendar_deleted` | No arguments; returns recoverable deleted original events, newest first |
+| `calendar_restore` | Optional `id`; omit to restore the latest deletion |
 
 Dates use `YYYY-MM-DD`, time is optional local `HH:MM`, title is at most 200 characters, notes at most 4,096 characters. Colors are `#RRGGBB`. Recurrence is `daily`, `weekly`, `monthly`, or `yearly`. Use JSON `null` to clear color, recurrence, or reminder. A recurring entry retains its original ID; edits, deletion, and completion affect the entire series. Do not represent one-occurrence edits as supported. Monthly repeats skip missing month days; February 29 yearly repeats occur only in leap years.
 
-For creation, generate a UUID request ID once and reuse it for retries of the same payload. Do not generate a fresh ID after an unknown outcome. Deleted request IDs cannot be reused. For update, detail changes, or deletion, first find the matching entry and use its actual ID; clarify multiple plausible matches. Use `calendar_today`'s unmodified `event` or read the full original event from `calendar_list` immediately before writing and send that object as `expected`. Occurrence results replace the original date with the occurrence date, so do not use them as the snapshot or silently change a recurring series' start date.
+For creation, generate a UUID request ID once and reuse it for retries of the same payload. Do not generate a fresh ID after an unknown outcome. Deleted request IDs cannot be reused for a new event; restoring recovers the original event instead. For update, detail changes, or ID-based deletion, use the actual ID and original snapshot; clarify multiple plausible matches. Use `calendar_today`'s unmodified `event` or read the full original event from `calendar_list` immediately before writing and send that object as `expected`. Exact date/title deletion resolves its own guarded snapshot, so it needs no preliminary read. Occurrence results replace the original date with the occurrence date, so do not use them as the snapshot or silently change a recurring series' start date.
 
 The server rejects a write if the saved event has changed since that snapshot. On conflict, re-read and explain the conflicting change; do not drop `expected` or blindly retry over it. JSON null is valid inside `expected`; at the top level, omit `time` for an untimed event because `time: null` is not accepted.
 
-After a write, read back and compare the returned ID and changed fields before saying it was saved. After deletion, verify the ID is absent. If an update/delete response is lost, first read by ID to see whether the requested change already succeeded; an old expected snapshot will conflict after a successful first write. Retry at most once after a transient failure, using the same creation request ID. On continued failure, explain the failure without claiming success. Read only the date range needed for the request.
+The MCP server verifies writes and deletion absence before returning success. If an update/delete/restore response is lost or read-back verification fails, first read by ID to see whether the requested change already succeeded; an old expected snapshot will conflict after a successful first write. Never blindly repeat date/title deletion after an unknown outcome, because another matching event could have been added. Retry at most once after a transient failure, using the same creation request ID. On continued failure, explain the failure without claiming success. Read only the date range needed for the request.
+
+Never retry `calendar_restore {}` after an unknown outcome: it could restore the next event. Reconcile `calendar_deleted` and `calendar_list`; if the intended restored ID cannot be established, ask rather than restoring another event. Prefer an explicit ID when the deleted target is already known.
 
 Local changes immediately signal the running widget. Google sync, if configured separately in the app, is asynchronous; a successful local write does not prove Google or another device has received it.

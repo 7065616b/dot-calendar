@@ -150,12 +150,50 @@ fn is_tool(name: &str) -> bool {
             | "calendar_update"
             | "calendar_set_details"
             | "calendar_delete"
+            | "calendar_deleted"
+            | "calendar_restore"
     )
 }
 
 fn call_tool(name: &str, args: &Value, store: &Store) -> Result<Value, String> {
+    let result = execute_tool(name, args, store)?;
+    if matches!(
+        name,
+        "calendar_create"
+            | "calendar_update"
+            | "calendar_set_details"
+            | "calendar_delete"
+            | "calendar_restore"
+    ) {
+        let id = result["id"].as_str().ok_or("write returned no event id")?;
+        let saved = store
+            .list_events(None)?
+            .into_iter()
+            .find(|event| event.id == id);
+        let verified = if name == "calendar_delete" {
+            saved.is_none()
+        } else {
+            saved
+                .map(serde_json::to_value)
+                .transpose()
+                .map_err(|e| e.to_string())?
+                .as_ref()
+                == Some(&result)
+        };
+        if !verified {
+            return Err("write completed but read-back differs; re-read before retrying".into());
+        }
+    }
+    Ok(result)
+}
+
+fn execute_tool(name: &str, args: &Value, store: &Store) -> Result<Value, String> {
     let empty = Map::new();
-    let args = if args.is_null() && matches!(name, "calendar_list" | "calendar_today") {
+    let args = if args.is_null()
+        && matches!(
+            name,
+            "calendar_list" | "calendar_today" | "calendar_deleted" | "calendar_restore"
+        ) {
         &empty
     } else {
         args.as_object().ok_or("arguments must be an object")?
@@ -286,14 +324,66 @@ fn call_tool(name: &str, args: &Value, store: &Store) -> Result<Value, String> {
             .map_err(|e| e.to_string())
         }
         "calendar_delete" => {
-            validate_keys(args, &["id"], &["expected"])?;
-            let id = required_string(args, "id", 128)?;
-            let expected = optional_expected(args, id)?;
-            serde_json::to_value(store.delete_event_expected(id, expected.as_ref())?)
-                .map_err(|e| e.to_string())
+            let deleted = if args.contains_key("id") {
+                validate_keys(args, &["id"], &["expected"])?;
+                let id = required_string(args, "id", 128)?;
+                let expected = optional_expected(args, id)?;
+                store.delete_event_expected(id, expected.as_ref())?
+            } else {
+                validate_keys(args, &["date", "title"], &["time", "series"])?;
+                let date = Date::parse(required_string(args, "date", 10)?)?;
+                let title = required_string(args, "title", 200)?;
+                let time = optional_string(args, "time", 5)?;
+                let series = optional_bool(args, "series")?.unwrap_or(false);
+                store.delete_event_selected(|events| {
+                    matching_delete_event(events, date, title, time, series)
+                        .map(|event| event.id.clone())
+                })?
+            };
+            serde_json::to_value(deleted).map_err(|e| e.to_string())
+        }
+        "calendar_deleted" => {
+            validate_keys(args, &[], &[])?;
+            serde_json::to_value(store.list_deleted_events()?).map_err(|e| e.to_string())
+        }
+        "calendar_restore" => {
+            validate_keys(args, &[], &["id"])?;
+            let restored = match optional_string(args, "id", 128)? {
+                Some(id) => store.restore_deleted_event(id)?,
+                None => store.restore_last_deleted()?,
+            };
+            serde_json::to_value(restored).map_err(|e| e.to_string())
         }
         _ => Err("Unknown tool".to_owned()),
     }
+}
+
+fn matching_delete_event<'a>(
+    events: &'a [Event],
+    date: Date,
+    title: &str,
+    time: Option<&str>,
+    series: bool,
+) -> Result<&'a Event, String> {
+    let mut matches = occurrence_indices(events, date, date)
+        .into_iter()
+        .map(|(_, index)| &events[index])
+        .filter(|event| {
+            event.title == title && time.is_none_or(|time| event.time.as_deref() == Some(time))
+        });
+    let event = matches
+        .next()
+        .ok_or("no event matches that exact date and title; nothing deleted")?;
+    if matches.next().is_some() {
+        return Err(
+            "multiple events match; specify the time or read their IDs first; nothing deleted"
+                .into(),
+        );
+    }
+    if event.recurrence.is_some() && !series {
+        return Err("this is a recurring series; delete affects all occurrences and requires series: true; nothing deleted".into());
+    }
+    Ok(event)
 }
 
 fn validate_keys(
@@ -492,9 +582,19 @@ fn tool_definitions() -> Vec<Value> {
             "annotations": {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false}
         }),
         json!({
-            "name": "calendar_delete", "description": "Permanently delete a local event by id. Supply expected from calendar_list to reject concurrent edits.",
-            "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "minLength": 1, "maxLength": 128}, "expected": event_snapshot_schema()}, "required": ["id"], "additionalProperties": false},
+            "name": "calendar_delete", "description": "Move an event to local recoverable trash, then verify its absence before returning success. Use id plus expected, or exact occurrence date and title in one call; ambiguous matches are rejected. A matching recurring series requires series: true. Undo with calendar_restore or the app's last-deletion undo menu. Google sync is separate.",
+            "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "minLength": 1, "maxLength": 128}, "expected": event_snapshot_schema(), "date": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}, "title": {"type": "string", "minLength": 1, "maxLength": 200}, "time": {"type": "string", "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$"}, "series": {"type": "boolean"}}, "oneOf": [{"required": ["id"]}, {"required": ["date", "title"]}], "additionalProperties": false},
             "annotations": {"readOnlyHint": false, "destructiveHint": true, "idempotentHint": false, "openWorldHint": false}
+        }),
+        json!({
+            "name": "calendar_deleted", "description": "List recoverable local deleted events, newest first. These are not active calendar entries.",
+            "inputSchema": {"type": "object", "properties": {}, "additionalProperties": false},
+            "annotations": {"readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false}
+        }),
+        json!({
+            "name": "calendar_restore", "description": "Restore a deleted event by original id, or the most recent deletion if id is omitted. Preserves original fields, rejects collisions and verifies local read-back. This does not promise Google restoration.",
+            "inputSchema": {"type": "object", "properties": {"id": {"type": "string", "minLength": 1, "maxLength": 128}}, "additionalProperties": false},
+            "annotations": {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false}
         }),
     ]
 }
@@ -502,6 +602,35 @@ fn tool_definitions() -> Vec<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exact_delete_selector_rejects_ambiguity_and_guards_recurring_series() {
+        let first: Event = serde_json::from_value(json!({
+            "id": "one", "date": "2026-10-08", "time": "09:00", "title": "회의", "notes": ""
+        }))
+        .unwrap();
+        let mut second = first.clone();
+        second.id = "two".into();
+        second.time = Some("10:00".into());
+        let date = Date::parse("2026-10-08").unwrap();
+        let events = vec![first.clone(), second];
+        assert!(matching_delete_event(&events, date, "회의", None, false).is_err());
+        assert_eq!(
+            matching_delete_event(&events, date, "회의", Some("09:00"), false)
+                .unwrap()
+                .id,
+            "one"
+        );
+        assert!(matching_delete_event(&events, date, "다른 회의", None, false).is_err());
+        assert!(matching_delete_event(&events, date, "회의", Some("11:00"), false).is_err());
+        let mut weekly = first;
+        weekly.recurrence = Some("weekly".into());
+        let recurring = vec![weekly];
+        let next_week = Date::parse("2026-10-15").unwrap();
+        assert!(matching_delete_event(&recurring, next_week, "회의", None, false).is_err());
+        let found = matching_delete_event(&recurring, next_week, "회의", None, true).unwrap();
+        assert_eq!(found.date, "2026-10-08");
+    }
 
     #[test]
     fn rejects_wrong_types_and_extra_keys() {

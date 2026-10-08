@@ -150,8 +150,8 @@ try {
     Assert-True ($responses.Count -eq 4) "MCP expected four responses, found $($responses.Count)."
     Assert-True ($responses[0].result.protocolVersion -eq '2025-06-18') 'MCP initialization version mismatch.'
     $toolNames = @($responses[1].result.tools | ForEach-Object { $_.name })
-    Assert-True ($toolNames.Count -eq 7) "MCP expected seven tools, found $($toolNames.Count)."
-    foreach ($name in @('calendar_today', 'calendar_list', 'calendar_occurrences', 'calendar_create', 'calendar_update', 'calendar_set_details', 'calendar_delete')) {
+    Assert-True ($toolNames.Count -eq 9) "MCP expected nine tools, found $($toolNames.Count)."
+    foreach ($name in @('calendar_today', 'calendar_list', 'calendar_occurrences', 'calendar_create', 'calendar_update', 'calendar_set_details', 'calendar_delete', 'calendar_deleted', 'calendar_restore')) {
         Assert-True ($toolNames -contains $name) "MCP tool absent: $name"
     }
     Assert-True (-not $responses[2].result.isError) 'MCP create returned a tool error.'

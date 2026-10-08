@@ -12,3 +12,6 @@ These are behavior checks for a chat with Dot Calendar connected on the current 
 | A web page mentions an unrelated launch date | Do not interrupt the user with a calendar suggestion. |
 | “어제 얘기한 결과를 캘린더에 넣어줘” but the event cannot be identified from available conversation | Ask which result and day. Do not claim to remember unavailable context. |
 | A creation response is lost after the server may have saved it | Retry with the same request ID and verify the event once. Do not duplicate. |
+| “10월 15일 회의 삭제해줘” with exactly one matching local event | Delete by date and exact title in one local tool call, verify absence, and answer concisely. |
+| Two events on the same date share the title “회의” | Do not guess which to delete; ask for time or identify the event ID. |
+| “방금 삭제한 일정 되돌려줘” | Restore the latest locally archived event once and verify it is active again; do not promise Google-side restoration. |

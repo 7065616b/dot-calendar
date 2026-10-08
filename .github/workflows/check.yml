@@ -34,3 +34,6 @@ jobs:
       - name: Installed Dot connection and helper
         shell: pwsh
         run: ./scripts/test-dot-connection.ps1 -ExePath "$pwd\target\release\dot-calendar.exe"
+      - name: Dot helper deletion and recovery regressions
+        shell: pwsh
+        run: ./integration/dot-calendar/scripts/test-invoke-calendar.ps1 -ExePath "$pwd\target\release\dot-calendar.exe"

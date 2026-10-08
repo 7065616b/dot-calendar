@@ -27,7 +27,7 @@ use windows_sys::Win32::{
     },
 };
 
-const RELOAD: u32 = WM_APP + 1;
+const RELOAD: u32 = crate::store::STORE_CHANGED;
 const APP_ICON_RESOURCE_ID: usize = 101;
 const SYNC_DONE: u32 = WM_APP + 2;
 const TRAY: u32 = WM_APP + 3;
@@ -67,6 +67,7 @@ const SHOW_GOOGLE: i32 = 45;
 const VIEW: i32 = 46;
 const AGENDA: i32 = 47;
 const DOT: i32 = 48;
+const UNDO_DELETE: i32 = 49;
 const PALETTE: [(&str, &str); 6] = [
     ("기본", ""),
     ("파랑", "#DCEBFA"),
@@ -386,6 +387,7 @@ struct App {
     selected: Date,
     selected_id: Option<String>,
     inline: Option<InlineEditor>,
+    active_form: HWND,
     cells: Vec<Cell>,
     grid_key: Option<(Date, bool, bool)>,
     events: Vec<Event>,
@@ -985,7 +987,7 @@ impl App {
         let footer = if self.status.starts_with("메모 저장 실패: ") {
             &self.status
         } else if self.inline.is_some() {
-            "Ctrl+Enter / 바깥 클릭: 저장 · 삭제: 반복 전체·Google 동기화에 적용 · Esc: 취소"
+            "Ctrl+Enter / 바깥 클릭: 저장 · 삭제는 메뉴에서 되돌리기 가능 · Esc: 취소"
         } else if !self.status.is_empty() {
             &self.status
         } else {
@@ -1141,6 +1143,7 @@ unsafe fn popup(hwnd: HWND, cell: Option<usize>) {
         }
         for (id, t) in [
             (DOT, "Dot · 간편 연결"),
+            (UNDO_DELETE, "마지막 삭제 되돌리기"),
             (SETTINGS, "설정"),
             (CONNECT, "Google 계정 연결"),
             (DISCONNECT, "이 PC의 Google 연결 해제"),
@@ -1739,7 +1742,7 @@ unsafe fn command(hwnd: HWND, id: i32) {
                 if message(
                     hwnd,
                     "일정 삭제",
-                    &format!("‘{}’ 메모를 삭제할까요?{}\nGoogle과 동기화한 일정이면 Google에도 삭제가 반영됩니다.", e.title, suffix),
+                    &format!("‘{}’ 메모를 삭제할까요?{}\n메뉴에서 마지막 삭제를 되돌릴 수 있습니다. Google과 동기화한 일정이면 Google에도 삭제가 반영됩니다.", e.title, suffix),
                     MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2,
                 ) == IDYES
                 {
@@ -1748,6 +1751,20 @@ unsafe fn command(hwnd: HWND, id: i32) {
                         show_error(&e);
                     }
                     (*ptr).borrow_mut().refresh();
+                }
+            }
+        }
+        UNDO_DELETE => {
+            let result = (*ptr).borrow().store.restore_last_deleted();
+            let mut a = (*ptr).borrow_mut();
+            match result {
+                Ok(event) => {
+                    a.status = format!("삭제 되돌림 · {}", event.title);
+                    a.refresh();
+                }
+                Err(error) => {
+                    a.status = format!("삭제 되돌리기 실패: {error}");
+                    a.redraw();
                 }
             }
         }
@@ -2581,6 +2598,19 @@ unsafe extern "system" fn form_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
         }
         return 0;
     }
+    if msg == RELOAD {
+        if let Ok(mut form) = (*ptr).try_borrow_mut() {
+            form.update_agenda(hwnd, true);
+        } else {
+            SetTimer(hwnd, 6, 50, None);
+        }
+        return 0;
+    }
+    if msg == WM_TIMER && wp == 6 {
+        KillTimer(hwnd, 6);
+        PostMessageW(hwnd, RELOAD, 0, 0);
+        return 0;
+    }
     if msg == WM_NOTIFY && lp != 0 {
         let draw = &*(lp as *const NMCUSTOMDRAW);
         if draw.hdr.code == NM_CUSTOMDRAW {
@@ -2853,50 +2883,43 @@ unsafe fn form(
         show_error("편집 창을 열 수 없습니다.");
         return false;
     }
+    let app = GetWindowLongPtrW(parent, GWLP_USERDATA) as *const RefCell<App>;
+    (*app).borrow_mut().active_form = h;
     EnableWindow(parent, 0);
     ShowWindow(h, SW_SHOW);
     SetForegroundWindow(h);
     let input = state.borrow().fields[0].hwnd;
     SetFocus(input);
-    let signal = if state
+    let has_agenda = state
         .borrow()
         .fields
         .iter()
-        .any(|f| matches!(f.kind, Kind::Agenda { .. }))
-    {
-        let app = GetWindowLongPtrW(parent, GWLP_USERDATA) as *const RefCell<App>;
-        Some((*app).borrow().store.change_event_handle())
-    } else {
-        None
-    };
+        .any(|f| matches!(f.kind, Kind::Agenda { .. }));
+    let signal = (*app).borrow().store.change_event_handle();
     let mut msg = zeroed();
     loop {
         if state.borrow().done || IsWindow(h) == 0 {
             break;
         }
-        let ret = if let Some(signal) = signal {
-            // Use the existing change event while this nested loop owns input.
-            // No timer or extra thread is needed to keep Dot updates visible.
-            let wait =
-                MsgWaitForMultipleObjectsEx(1, &signal, INFINITE, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
-            if wait == WAIT_OBJECT_0 {
+        // This nested loop owns input while the form is open, so it must also
+        // consume store changes and refresh the disabled owner behind it.
+        let wait =
+            MsgWaitForMultipleObjectsEx(1, &signal, INFINITE, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+        if wait == WAIT_OBJECT_0 {
+            if has_agenda {
                 state.borrow_mut().update_agenda(h, true);
-                continue;
+            } else if IsWindow(parent) != 0 {
+                SendMessageW(parent, RELOAD, 0, 0);
             }
-            if wait == WAIT_FAILED {
-                break;
-            }
-            if PeekMessageW(&mut msg, null_mut(), 0, 0, PM_REMOVE) == 0 {
-                continue;
-            }
-            if msg.message == WM_QUIT {
-                0
-            } else {
-                1
-            }
-        } else {
-            GetMessageW(&mut msg, null_mut(), 0, 0)
-        };
+            continue;
+        }
+        if wait == WAIT_FAILED {
+            break;
+        }
+        if PeekMessageW(&mut msg, null_mut(), 0, 0, PM_REMOVE) == 0 {
+            continue;
+        }
+        let ret = if msg.message == WM_QUIT { 0 } else { 1 };
         if ret <= 0 {
             if ret == 0 {
                 PostQuitMessage(msg.wParam as i32);
@@ -2922,6 +2945,7 @@ unsafe fn form(
     if IsWindow(h) != 0 {
         DestroyWindow(h);
     }
+    (*app).borrow_mut().active_form = null_mut();
     let restore_opacity = {
         let f = state.borrow();
         if f.committed {
@@ -3414,6 +3438,35 @@ unsafe extern "system" fn controller_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: 
         }
         return 0;
     }
+    if msg == RELOAD {
+        // The main loop may be inside a MessageBox or TaskDialog. Its event
+        // wait is suspended there, but the controller still receives messages.
+        let (signal, widget, form) = match (*ptr).try_borrow() {
+            Ok(app) => (app.store.change_event_handle(), app.hwnd, app.active_form),
+            Err(_) => {
+                SetTimer(hwnd, 6, 50, None);
+                return 0;
+            }
+        };
+        // Only the first of this message and the normal event loop consumes
+        // the auto-reset event, so one write causes one refresh.
+        if WaitForSingleObject(signal, 0) == WAIT_OBJECT_0 {
+            if !widget.is_null() && IsWindow(widget) != 0 {
+                SendMessageW(widget, RELOAD, 0, 0);
+            } else {
+                PostMessageW(hwnd, REBUILD_WIDGET, 0, 0);
+            }
+            if !form.is_null() && IsWindow(form) != 0 {
+                SendMessageW(form, RELOAD, 0, 0);
+            }
+        }
+        return 0;
+    }
+    if msg == WM_TIMER && wp == 6 {
+        KillTimer(hwnd, 6);
+        PostMessageW(hwnd, RELOAD, 0, 0);
+        return 0;
+    }
     if msg == SYNC_DONE {
         let Ok(mut app) = (*ptr).try_borrow_mut() else {
             SetTimer(hwnd, 5, 100, None);
@@ -3660,6 +3713,7 @@ pub fn run(open_dot: bool) -> Result<(), String> {
             selected: today,
             selected_id: None,
             inline: None,
+            active_form: null_mut(),
             cells: vec![],
             grid_key: None,
             events: vec![],

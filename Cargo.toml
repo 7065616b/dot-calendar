@@ -1,6 +1,6 @@
 [package]
 name = "dot-calendar"
-version = "0.3.13"
+version = "0.3.14"
 edition = "2021"
 description = "A quiet, native Windows calendar for Your dot"
 license = "MIT"
