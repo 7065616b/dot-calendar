@@ -1,0 +1,221 @@
+{
+  "version": "0.3.11",
+  "measured_date": "2026-10-08",
+  "timezone": "Asia/Seoul",
+  "platform": "Windows x64",
+  "executable_sha256": "32F672E10606C97607FEEFC2D3F4B36FDBE0B140EFA028F7169E16F3368EE70D",
+  "executable_bytes": 1031168,
+  "conditions": "desktop=True 1650x1107; dark=True; opacity 204/255; lunar/holidays on; Google off",
+  "iterations": 3,
+  "idle_seconds": 10,
+  "settle_seconds": 2,
+  "definitions": {
+    "WorkingSetMiB": "Total resident working set including shared pages, MiB.",
+    "CpuDeltaMs": "Process CPU time increase during each idle interval.",
+    "PrivateMiB": "Process private committed memory, MiB. Not total resident working set."
+  },
+  "limitations": "One Windows PC, synthetic data, Google sync off. Values are not maximum guarantees; not a comparison against other applications.",
+  "cases": [
+    {
+      "Name": "empty",
+      "EventCount": 0,
+      "DatabaseBytes": 50,
+      "Median": {
+        "InputIdleMs": 97.8,
+        "StartupCpuMs": 78.1,
+        "PrivateMiB": 2.55,
+        "WorkingSetMiB": 15.05,
+        "PeakWorkingSetMiB": 15.05,
+        "CpuDeltaMs": 0.0,
+        "IdleReadBytes": 0.0,
+        "IdleWriteBytes": 0.0,
+        "IdleOtherOperations": 0.0,
+        "Handles": 277.0,
+        "Threads": 4.0,
+        "GdiObjects": 8.0,
+        "UserObjects": 16.0
+      },
+      "Samples": [
+        {
+          "InputIdleMs": 97.8,
+          "StartupCpuMs": 78.1,
+          "PrivateMiB": 2.55,
+          "WorkingSetMiB": 15.05,
+          "PeakWorkingSetMiB": 15.05,
+          "CpuDeltaMs": 0.0,
+          "IdleReadBytes": 0,
+          "IdleWriteBytes": 0,
+          "IdleOtherOperations": 0,
+          "Handles": 277,
+          "Threads": 4,
+          "GdiObjects": 8,
+          "UserObjects": 16
+        },
+        {
+          "InputIdleMs": 76.5,
+          "StartupCpuMs": 31.2,
+          "PrivateMiB": 2.55,
+          "WorkingSetMiB": 15.05,
+          "PeakWorkingSetMiB": 15.05,
+          "CpuDeltaMs": 0.0,
+          "IdleReadBytes": 0,
+          "IdleWriteBytes": 0,
+          "IdleOtherOperations": 0,
+          "Handles": 277,
+          "Threads": 4,
+          "GdiObjects": 8,
+          "UserObjects": 16
+        },
+        {
+          "InputIdleMs": 144.1,
+          "StartupCpuMs": 78.1,
+          "PrivateMiB": 2.54,
+          "WorkingSetMiB": 15.05,
+          "PeakWorkingSetMiB": 15.05,
+          "CpuDeltaMs": 0.0,
+          "IdleReadBytes": 0,
+          "IdleWriteBytes": 0,
+          "IdleOtherOperations": 0,
+          "Handles": 277,
+          "Threads": 4,
+          "GdiObjects": 8,
+          "UserObjects": 16
+        }
+      ]
+    },
+    {
+      "Name": "typical100",
+      "EventCount": 100,
+      "DatabaseBytes": 21049,
+      "Median": {
+        "InputIdleMs": 202.2,
+        "StartupCpuMs": 125.0,
+        "PrivateMiB": 2.59,
+        "WorkingSetMiB": 15.18,
+        "PeakWorkingSetMiB": 15.18,
+        "CpuDeltaMs": 0.0,
+        "IdleReadBytes": 0.0,
+        "IdleWriteBytes": 0.0,
+        "IdleOtherOperations": 0.0,
+        "Handles": 277.0,
+        "Threads": 4.0,
+        "GdiObjects": 8.0,
+        "UserObjects": 16.0
+      },
+      "Samples": [
+        {
+          "InputIdleMs": 202.2,
+          "StartupCpuMs": 125.0,
+          "PrivateMiB": 2.59,
+          "WorkingSetMiB": 15.18,
+          "PeakWorkingSetMiB": 15.18,
+          "CpuDeltaMs": 0.0,
+          "IdleReadBytes": 0,
+          "IdleWriteBytes": 0,
+          "IdleOtherOperations": 0,
+          "Handles": 277,
+          "Threads": 4,
+          "GdiObjects": 8,
+          "UserObjects": 16
+        },
+        {
+          "InputIdleMs": 197.8,
+          "StartupCpuMs": 109.4,
+          "PrivateMiB": 2.61,
+          "WorkingSetMiB": 15.28,
+          "PeakWorkingSetMiB": 15.28,
+          "CpuDeltaMs": 0.0,
+          "IdleReadBytes": 0,
+          "IdleWriteBytes": 0,
+          "IdleOtherOperations": 0,
+          "Handles": 277,
+          "Threads": 4,
+          "GdiObjects": 8,
+          "UserObjects": 16
+        },
+        {
+          "InputIdleMs": 203.2,
+          "StartupCpuMs": 140.6,
+          "PrivateMiB": 2.59,
+          "WorkingSetMiB": 15.18,
+          "PeakWorkingSetMiB": 15.18,
+          "CpuDeltaMs": 0.0,
+          "IdleReadBytes": 0,
+          "IdleWriteBytes": 0,
+          "IdleOtherOperations": 0,
+          "Handles": 277,
+          "Threads": 4,
+          "GdiObjects": 8,
+          "UserObjects": 16
+        }
+      ]
+    },
+    {
+      "Name": "stress500daily",
+      "EventCount": 500,
+      "DatabaseBytes": 2143549,
+      "Median": {
+        "InputIdleMs": 165.6,
+        "StartupCpuMs": 109.4,
+        "PrivateMiB": 5.28,
+        "WorkingSetMiB": 17.96,
+        "PeakWorkingSetMiB": 17.96,
+        "CpuDeltaMs": 0.0,
+        "IdleReadBytes": 0.0,
+        "IdleWriteBytes": 0.0,
+        "IdleOtherOperations": 0.0,
+        "Handles": 277.0,
+        "Threads": 4.0,
+        "GdiObjects": 8.0,
+        "UserObjects": 16.0
+      },
+      "Samples": [
+        {
+          "InputIdleMs": 165.6,
+          "StartupCpuMs": 109.4,
+          "PrivateMiB": 5.28,
+          "WorkingSetMiB": 17.96,
+          "PeakWorkingSetMiB": 17.96,
+          "CpuDeltaMs": 0.0,
+          "IdleReadBytes": 0,
+          "IdleWriteBytes": 0,
+          "IdleOtherOperations": 0,
+          "Handles": 277,
+          "Threads": 4,
+          "GdiObjects": 8,
+          "UserObjects": 16
+        },
+        {
+          "InputIdleMs": 146.7,
+          "StartupCpuMs": 109.4,
+          "PrivateMiB": 5.29,
+          "WorkingSetMiB": 17.97,
+          "PeakWorkingSetMiB": 17.97,
+          "CpuDeltaMs": 0.0,
+          "IdleReadBytes": 0,
+          "IdleWriteBytes": 0,
+          "IdleOtherOperations": 0,
+          "Handles": 277,
+          "Threads": 4,
+          "GdiObjects": 8,
+          "UserObjects": 16
+        },
+        {
+          "InputIdleMs": 303.2,
+          "StartupCpuMs": 156.2,
+          "PrivateMiB": 5.25,
+          "WorkingSetMiB": 17.91,
+          "PeakWorkingSetMiB": 17.91,
+          "CpuDeltaMs": 0.0,
+          "IdleReadBytes": 0,
+          "IdleWriteBytes": 0,
+          "IdleOtherOperations": 0,
+          "Handles": 277,
+          "Threads": 4,
+          "GdiObjects": 8,
+          "UserObjects": 16
+        }
+      ]
+    }
+  ]
+}

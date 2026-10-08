@@ -1,0 +1,6 @@
+interface:
+  display_name: "Dot Calendar"
+  short_description: "닷에서 오늘 일정 조회·실행과 바탕화면 달력 관리"
+  default_prompt: "Use $dot-calendar to read today's desktop calendar agenda and help carry out actionable tasks."
+policy:
+  allow_implicit_invocation: true

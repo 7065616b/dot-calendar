@@ -1,0 +1,33 @@
+name: Windows checks
+
+on:
+  push:
+    branches: [main]
+    paths: ['src/**', 'resources/**', 'scripts/**', 'integration/**', 'Cargo.toml', 'Cargo.lock', 'build.rs', '.github/workflows/check.yml']
+  pull_request:
+    paths: ['src/**', 'resources/**', 'scripts/**', 'integration/**', 'Cargo.toml', 'Cargo.lock', 'build.rs', '.github/workflows/check.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Prepare Rust and resource compiler
+        shell: pwsh
+        run: |
+          rustup default stable-x86_64-pc-windows-msvc
+          rustup component add clippy rustfmt
+          $rc = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\rc.exe" | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $rc) { throw 'Windows SDK resource compiler not found.' }
+          "RC=$($rc.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - run: cargo fmt --all -- --check
+      - run: cargo test --locked
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo build --release --locked
+      - name: Isolated CLI and MCP smoke
+        shell: pwsh
+        run: ./scripts/smoke.ps1 -ExePath "$pwd\target\release\dot-calendar.exe"

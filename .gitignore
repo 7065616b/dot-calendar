@@ -1,0 +1,14 @@
+/target/
+/.tools/
+/dist/
+/qa-data/
+/workflow/
+*.log
+**/connection.json
+**/calendar.json
+**/widget.json
+**/google-config.json
+**/google-sync-*.json
+**/google-tokens.dpapi
+.env
+.env.*
