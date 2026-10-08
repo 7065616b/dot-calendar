@@ -3,9 +3,9 @@ name: Windows checks
 on:
   push:
     branches: [main]
-    paths: ['src/**', 'resources/**', 'scripts/**', 'integration/**', 'Cargo.toml', 'Cargo.lock', 'build.rs', '.github/workflows/check.yml']
+    paths: ['src/**', 'resources/**', 'scripts/**', 'installer/**', 'integration/**', 'Cargo.toml', 'Cargo.lock', 'build.rs', '.github/workflows/check.yml']
   pull_request:
-    paths: ['src/**', 'resources/**', 'scripts/**', 'integration/**', 'Cargo.toml', 'Cargo.lock', 'build.rs', '.github/workflows/check.yml']
+    paths: ['src/**', 'resources/**', 'scripts/**', 'installer/**', 'integration/**', 'Cargo.toml', 'Cargo.lock', 'build.rs', '.github/workflows/check.yml']
   workflow_dispatch:
 
 permissions:
@@ -31,3 +31,6 @@ jobs:
       - name: Isolated CLI and MCP smoke
         shell: pwsh
         run: ./scripts/smoke.ps1 -ExePath "$pwd\target\release\dot-calendar.exe"
+      - name: Installed Dot connection and helper
+        shell: pwsh
+        run: ./scripts/test-dot-connection.ps1 -ExePath "$pwd\target\release\dot-calendar.exe"

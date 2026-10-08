@@ -1,19 +1,27 @@
-# Dot Calendar 대화 연결
+# Dot Calendar와 Your dot 연결
 
-위젯과 닷 전용 스킬은 같은 Windows 일정 파일을 사용합니다. 스킬은 요청할 때만 Rust MCP 프로세스를 실행하고 종료합니다. 별도의 상주 서버는 추가하지 않습니다. 로컬 도구 검사는 통과했으며, 실제 Your dot 대화에서의 호출은 별도 확인이 필요합니다.
+바탕화면 달력과 닷은 이 PC의 같은 일정 파일을 사용합니다. 설치 후 닷에게 짧게 말해 일정을 찾거나 바꿀 수 있도록 준비했습니다. 로컬 도구 검사는 통과했으며, 실제 Your dot 계정 대화에서의 호출은 별도 확인이 필요합니다.
 
-## Your dot 연결 설치
+## 연결하기
 
-1. 압축을 풀고 `dot-calendar.exe`를 계속 사용할 폴더에 둡니다. 개발 저장소에서는 `dist/dot-calendar.exe`를 사용합니다.
-2. 그 폴더에서 PowerShell로 `./scripts/install-dot-skill.ps1`을 실행합니다. 실행 정책이 스크립트를 차단하는 Windows 기본 PowerShell에서는 검토한 설치 스크립트에 한해 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-dot-skill.ps1`로 실행할 수 있습니다. 영구 실행 정책은 바꾸지 않습니다.
-3. Your dot의 Computers에서 이 PC 접근을 허용하고 PC와 ChatGPT 앱을 온라인 상태로 유지합니다. [공식 컴퓨터 연결 안내](https://learn.chatgpt.com/docs/dots/computers-and-apps)에 따르면 로컬 스킬은 연결된 컴퓨터가 필요합니다.
-4. 먼저 닷에 **“연결된 PC의 dot-calendar 스킬로 오늘 일정을 조회해줘”**라고 요청합니다. 확인되면 **“오늘 일정 실행해줘”**라고 말할 수 있습니다. 스킬이 보이지 않으면 새 대화에서 다시 확인하거나 앱을 재시작합니다.
+1. [Windows 설치 파일](https://github.com/7065616b/dot-calendar/releases/download/v0.3.12/dot-calendar-0.3.12-windows-x64-setup.exe)을 실행합니다. 현재 사용자 계정에 달력과 닷의 로컬 연결이 함께 설치됩니다.
+2. 앱의 **Dot** 버튼에서 다음 문구를 복사해 Your dot에 **한 번** 보냅니다.
 
-설치 위치는 현재 [공식 로컬 스킬 경로](https://learn.chatgpt.com/docs/build-skills)인 `%USERPROFILE%\.agents\skills\dot-calendar`입니다. `-SkillsDirectory`로 호스트가 사용하는 다른 스킬 폴더를 지정할 수 있습니다. 설치별 `connection.json`은 실행 파일과 실제 달력 데이터 폴더를 기록합니다. 실행 파일을 옮겼다면 설치 스크립트를 다시 실행하세요. 다른 PC에서는 각각 설치해야 하며, 이 연결 파일은 배포 파일에 포함하지 않습니다.
+   > 내 기본 캘린더는 연결된 PC의 Dot Calendar야. 앞으로 캘린더 요청은 여기에 반영하고, 작업 중 완료 예정일이나 마감일이 나오면 추가할지 먼저 물어봐. 이 설정을 기억하고 오늘 일정을 확인해줘.
 
-조회가 확인되면 **“내일 오후 3시에 회의 추가해줘”**, **“내일 회의를 4시로 옮겨줘”**처럼 요청합니다. 명확한 요청에는 추가 확인 없이 저장 후 다시 조회해 결과를 검증하도록 스킬에 정의했습니다. 중복 가능성이 있는 재시도에는 같은 요청 ID를 사용합니다. Google의 실제 원격 반영 여부는 로컬 저장 결과와 별개입니다.
+3. 이후에는 **“내일 3시 회의 추가해줘”**, **“그 회의를 4시로 옮겨줘”**, **“이거 캘린더에 반영해줘”**처럼 말합니다. 현재 대화에서 작업의 완료 예정일이 나오면 닷이 **“10월 15일 마감으로 캘린더에 추가할까요?”**라고 한 번 묻고, 동의하면 그 일정으로 추가하도록 안내합니다. 사용자가 직접 추가를 요청한 일정은 다시 확인하지 않습니다.
 
-이 스킬 설치는 ChatGPT 웹·모바일에 로컬 실행 파일을 직접 등록하는 기능이 아닙니다. 연결된 PC에서 실행 가능한 닷/로컬 대화가 사용합니다. 다른 달력 서비스를 명시하면 그 선택을 우선합니다.
+Your dot의 Computers에서 이 PC 접근을 허용하고 PC와 ChatGPT 앱을 온라인 상태로 유지해야 합니다. [공식 컴퓨터 연결 안내](https://learn.chatgpt.com/docs/dots/computers-and-apps)를 참고하세요. 설치 프로그램은 **이 PC의 로컬 연결만** 등록하며, Your dot 계정의 기억이나 기본 달력 선택을 직접 변경하지 않습니다. 문구를 기억하는지와 실제 연결 도구 호출은 사용 환경에서 확인해야 합니다. 다른 달력 서비스를 명시하면 그 선택을 우선합니다.
+
+설치 없는 휴대용 ZIP을 사용한다면 압축을 원하는 고정 폴더에 풀고 앱을 실행한 뒤 **Dot** 버튼에서 이 PC 연결을 등록합니다. 실행 파일 위치를 바꾼 뒤에는 같은 버튼에서 다시 연결합니다.
+
+## 연결 방식과 직접 설치
+
+위젯과 닷 전용 스킬은 같은 Windows 일정 파일을 사용합니다. 스킬은 요청할 때만 Rust MCP 프로세스를 실행하고 종료하며 별도의 상주 서버는 추가하지 않습니다. 명확한 요청은 저장 후 다시 조회해 검증하고, 중복 가능성이 있는 재시도에는 같은 요청 ID를 사용합니다. Google의 실제 원격 반영 여부는 로컬 저장과 별개입니다.
+
+개발 저장소에서는 `dist/dot-calendar.exe`를 빌드한 뒤 PowerShell에서 `./scripts/install-dot-skill.ps1`을 직접 실행할 수도 있습니다. 실행 정책이 차단하는 경우 검토한 스크립트에 한해 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-dot-skill.ps1`을 사용하고 영구 실행 정책은 바꾸지 않습니다.
+
+설치 위치는 [공식 로컬 스킬 경로](https://learn.chatgpt.com/docs/build-skills)인 `%USERPROFILE%\.agents\skills\dot-calendar`입니다. `-SkillsDirectory`로 다른 호스트 폴더를 지정할 수 있습니다. 설치별 `connection.json`은 실행 파일과 데이터 폴더를 기록합니다. 다른 PC에서는 각각 설치해야 하며 이 파일은 배포 파일에 포함하지 않습니다. 새 대화에서 연결이 보이지 않으면 앱을 재시작한 뒤 다시 시도하세요. 연결된 PC에서 실행 가능한 닷/로컬 대화가 사용하며, ChatGPT 웹·모바일에 이 PC 실행 파일을 직접 등록하지는 않습니다.
 
 ## 개발자 명령
 

@@ -2,14 +2,14 @@
 
 **Rust로 만든 가벼운 Windows 바탕화면 달력. 메모는 바로 쓰고, 일정 관리는 Your dot과 함께.**
 
-[웹사이트](https://7065616b.github.io/dot-calendar/) · [Windows 다운로드](https://github.com/7065616b/dot-calendar/releases/tag/v0.3.11) · [문제 제보](https://github.com/7065616b/dot-calendar/issues) · [MIT License](LICENSE)
+[웹사이트](https://7065616b.github.io/dot-calendar/) · [Windows 다운로드](https://github.com/7065616b/dot-calendar/releases/tag/v0.3.12) · [문제 제보](https://github.com/7065616b/dot-calendar/issues) · [MIT License](LICENSE)
 
-Windows 10 1703 이상 / Windows 11 **x64**용 공개 미리보기입니다. 설치 없이 ZIP 전체를 압축 해제하고 `dot-calendar.exe`를 실행하세요.
+Windows 10 1703 이상 / Windows 11 **x64**용 공개 미리보기입니다. [설치 파일](https://github.com/7065616b/dot-calendar/releases/download/v0.3.12/dot-calendar-0.3.12-windows-x64-setup.exe)을 실행하면 현재 사용자 계정에 달력과 닷의 로컬 연결이 함께 설치됩니다. 설치 없는 [휴대용 ZIP](https://github.com/7065616b/dot-calendar/releases/download/v0.3.12/dot-calendar-0.3.12-windows-x64-preview.zip)도 제공합니다.
 
 ## 작게 만들고, 필요할 때만 일합니다
 
 - **Rust + Win32 네이티브**: WebView·Electron·Node 런타임 없이 동작합니다.
-- **약 0.98MiB 실행 파일**: v0.3.11 Windows x64 실행 파일은 1,031,168 bytes입니다. ZIP에는 사용 안내·닷 스킬·의존성 라이선스도 포함됩니다.
+- **약 1.01MiB 실행 파일**: v0.3.12 Windows x64 실행 파일은 1,062,912 bytes입니다.
 - **이벤트 기반 대기**: 입력, 저장소 변경 신호, 날짜·알림·선택적 동기화 시각을 기다립니다. 달력 갱신용 유휴 폴링이나 애니메이션 루프를 두지 않습니다.
 - **필요한 데이터만 준비**: 반복 일정은 원본을 참조하고, 하루 목록과 전체 메모 창은 요청 시 생성해 닫을 때 해제합니다.
 
@@ -23,7 +23,7 @@ Windows 10 1703 이상 / Windows 11 **x64**용 공개 미리보기입니다. 설
 | 바로 쓰는 메모 | 날짜의 빈 곳이나 일정 블록을 더블클릭하면 메모 패널이 열립니다. |
 | 전체 메모 | 일정 선택 후 **전체 메모** 또는 Space로 긴 본문까지 읽고 복사합니다. |
 | 하루 전체 일정 | **`+N`**, 상단 **하루 일정**, 날짜 우클릭, Ctrl+Enter로 스크롤 목록을 엽니다. 100개 메뉴 제한이 없습니다. |
-| Your dot | 오늘 일정 조회, 생성·수정·삭제, 일정 메모에 적힌 작업을 읽고 실행하도록 돕는 로컬 스킬과 MCP를 제공합니다. |
+| Your dot | “내일 3시 회의 추가”, “이거 캘린더에 반영해줘”처럼 짧게 요청해 일정 조회·생성·수정·삭제를 돕습니다. 날짜가 정해진 작업은 추가할지 물어볼 수 있습니다. |
 | Google Calendar | 선택적 OAuth 연결·동기화, 가져온 일정 표시/숨김을 제공합니다. |
 | 일상 관리 | 반복 일정, 음력·한국 공휴일, 알림, 투명도·테마, 날짜 배경색, 백업·복원·인쇄를 지원합니다. |
 
@@ -39,17 +39,11 @@ Windows 10 1703 이상 / Windows 11 **x64**용 공개 미리보기입니다. 설
 
 ## Your dot 연결
 
-1. ZIP을 원하는 고정 폴더에 압축 해제합니다.
-2. PowerShell에서 압축을 푼 폴더의 설치 스크립트를 실행합니다.
+1. [Windows 설치 파일](https://github.com/7065616b/dot-calendar/releases/download/v0.3.12/dot-calendar-0.3.12-windows-x64-setup.exe)을 실행합니다. 닷의 로컬 연결도 함께 등록됩니다.
+2. 앱의 **Dot** 버튼에서 안내 문구를 복사해 Your dot에게 한 번 보냅니다. 연결된 PC와 대화 앱이 온라인이어야 합니다.
+3. 이제 **“오늘 일정 알려줘”**, **“내일 3시 회의 추가해줘”**, **“이거 캘린더에 반영해줘”**처럼 말합니다. 작업 중 구체적인 마감일이 생기면 닷이 **“10월 15일 마감으로 캘린더에 추가할까요?”**라고 제안하고, 수락하면 반영하도록 안내합니다.
 
-   ```powershell
-   ./scripts/install-dot-skill.ps1
-   ```
-
-3. Your dot에 **“연결된 PC의 dot-calendar 스킬로 오늘 일정을 조회해줘”**라고 요청합니다.
-4. 이어서 **“오늘 일정에 있는 작업을 읽고 정리한 뒤 실행해줘”**처럼 요청할 수 있습니다.
-
-PC가 대화 앱에 연결되어 있고 온라인이어야 합니다. 실행 파일을 옮겼다면 스킬 설치를 다시 실행하세요. 스킬은 요청 시에만 로컬 MCP 프로세스를 시작합니다. 연결된 도구로 실제 수행한 작업만 완료 처리하며 반복 시리즈와 Google 일정은 자동 완료하지 않습니다.
+안내 문구는 기본 달력 선호를 닷에게 알려주는 한 번의 대화입니다. 설치 프로그램은 이 PC의 로컬 연결을 등록하지만, Your dot 계정의 기억·기본 달력 설정을 자동으로 변경하지는 않습니다. 닷이 연결된 도구로 실제 수행한 작업만 완료 처리하며 반복 시리즈와 Google 일정은 자동 완료하지 않습니다. 설치 없는 ZIP을 쓰는 경우 앱의 **Dot** 버튼에서 이 PC 연결을 등록할 수 있습니다.
 
 로컬 스킬·MCP 검사는 통과했지만 **실제 Your dot 계정 대화 경유 실행은 아직 별도 검증이 필요합니다**. 일반 ChatGPT 채팅만으로 이 PC 파일에 자동 접근하는 기능은 아닙니다. 자세한 설정은 [닷·MCP 연결 안내](integration/README.md)에 있습니다.
 
@@ -65,7 +59,7 @@ PC가 대화 앱에 연결되어 있고 온라인이어야 합니다. 실행 파
 - 화면 설정: 같은 폴더의 `widget.json`
 - 테스트 분리: `DOT_CALENDAR_DATA_DIR`로 별도 저장 폴더 지정
 - JSON 백업: 앱 메뉴에서 내보내기·가져오기 지원, 복원 전 현재 데이터 백업
-- 업데이트: 앱을 종료한 뒤 기존 실행 폴더에 새 ZIP을 압축 해제합니다. 사용자 데이터는 실행 폴더와 별도로 보존됩니다.
+- 업데이트: 설치 파일을 다시 실행하거나, 휴대용 ZIP 사용자는 앱을 종료한 뒤 기존 폴더에 새 ZIP을 압축 해제합니다. 사용자 데이터는 실행 폴더와 별도로 보존됩니다.
 
 배포 ZIP에는 개인 일정·계정 토큰·설치별 경로가 포함되지 않습니다. 일정 파일은 최대 4MiB입니다. 한국 공휴일은 코드의 2024–2050년 규칙 기반이며, 향후 임시공휴일·선거일·법령 변경은 자동 반영되지 않습니다.
 
@@ -80,6 +74,6 @@ cargo clippy --locked --all-targets -- -D warnings
 ./scripts/smoke.ps1
 ```
 
-웹 소스는 `web/`의 정적 HTML/CSS/JavaScript입니다. GitHub Pages로 게시하고 실행 ZIP은 GitHub Releases에 둡니다. 이 프로젝트는 OpenAI 또는 Google의 공식 제품이 아닙니다.
+웹 소스는 `web/`의 정적 HTML/CSS/JavaScript입니다. GitHub Pages로 게시하고 설치 파일과 휴대용 ZIP은 GitHub Releases에 둡니다. 이 프로젝트는 OpenAI 또는 Google의 공식 제품이 아닙니다.
 
-앱 소스: [MIT](LICENSE). 의존성은 각 라이선스를 따르며 [Third-party notices](THIRD_PARTY_NOTICES.md)와 ZIP의 `licenses/`에 포함됩니다. 현재 배포 파일은 코드 서명되지 않은 미리보기이며 별도 설치기·자동 업데이트는 제공하지 않습니다.
+앱 소스: [MIT](LICENSE). 의존성은 각 라이선스를 따르며 [Third-party notices](THIRD_PARTY_NOTICES.md)와 배포 파일의 `licenses/`에 포함됩니다. 현재 배포 파일은 코드 서명되지 않은 미리보기이며 자동 업데이트는 제공하지 않습니다.

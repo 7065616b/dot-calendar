@@ -1,11 +1,19 @@
 ---
 name: dot-calendar
-description: Read today's agenda and manage schedules and notes in the Windows desktop Dot Calendar from Your dot or a connected local chat. Use for requests like "오늘 일정 실행해줘" and for adding, finding, changing, completing, or deleting desktop calendar entries. If the user explicitly names another calendar service, follow that choice.
+description: Manage the Windows desktop Dot Calendar in ordinary conversation. Use for short requests such as "내일 3시 회의 추가", "이거 캘린더에 반영해줘", "오늘 일정 알려줘", or "오늘 일정 실행해줘", and for changing or deleting events. When a user who uses Dot Calendar has a concrete future deadline or delivery date emerge during other work, offer to add it once. If the user names another calendar service, follow that choice.
 ---
 
 # Dot Calendar
 
 Use the connected Windows PC and the bundled `scripts/invoke-calendar.ps1`. The installer writes this skill's `connection.json` with the executable and calendar data directory for that PC. Do not guess paths, silently switch data directories, or edit `calendar.json` directly. This is a local integration; the connected PC and ChatGPT app must be available.
+
+## Talk like a calendar assistant
+
+- Treat plain Korean requests to put something "on the calendar", "in the desktop calendar", or "in Dot" as requests for this calendar when the user has chosen Dot Calendar and has not named another service. Never require the user to say the skill name, tool name, connected PC, or a long setup phrase in each request.
+- Use the active conversation to resolve "이거", "그 결과", or "그날" to the specific task, title, and date just discussed. Keep useful details in the note. Do not invent a date, time, outcome, or commitment. If a date or the referred task is genuinely unclear, ask one short question about only the missing detail. Time is optional; a clear date with no time is an all-day entry.
+- A direct request such as "내일 3시 회의 캘린더에 넣어줘" already authorizes `calendar_create`; write and verify, then answer briefly, for example "내일 15:00 회의를 캘린더에 추가했어요." Do not ask for a second confirmation. Apply the same principle to clear update and delete requests, while resolving the exact existing entry first.
+- When work in this conversation produces a **specific future completion or deadline date** and the user has expressed an ongoing preference to track such work in Dot Calendar, offer one compact suggestion: "10월 15일 마감으로 캘린더에 추가할까요?" Do not write until the user accepts. If they answer "응", "추가해줘", or equivalent, use the context already collected and add immediately; do not make them repeat the date, title, or skill invocation. If they decline, stop. Do not offer for incidental dates, past dates, or every step of a task.
+- After a successful write, say what changed in one sentence. Mention the connection, skill, MCP, or setup only when it fails or the user asks how it works. Never suggest that a reminder, Google sync, or an action outside the calendar succeeded unless verified separately.
 
 For today's agenda, call `calendar_today` with `{}`. The PC's Windows local date sets the day, recurring entries are included, completed entries are skipped, and imported Google entries follow the widget's visibility switch. Each result is `{source, event}`; `event` is the complete original series and can be supplied as `expected` for a guarded write. The response's top-level `date` is the occurrence date; a recurring event's own `date` remains its series start. Use `include_completed: true` only when the user asks to see finished items. For other days, resolve the date using the user's timezone and call `calendar_occurrences`. When the user names or selects one entry, narrow by its date and title or ID, then act only on that entry; clarify only if multiple plausible entries remain.
 

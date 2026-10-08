@@ -179,10 +179,12 @@ $quickstart = @'
 Dot Calendar portable preview
 
 1. Extract this entire ZIP, then run dot-calendar.exe to open the desktop widget.
-2. To let Your dot use this local calendar, run scripts\install-dot-skill.ps1
-   from this extracted folder. The installer records this PC's executable and
-   calendar-data paths in your personal skill directory.
-3. In Your dot, ask the connected PC to use the dot-calendar skill.
+2. Click Dot in the calendar. Local integration is prepared automatically.
+3. Copy the one-time introduction from that panel and send it to Your dot.
+   After that, use short requests such as "Add a meeting tomorrow at 3 PM."
+
+The setup.exe download handles installation and connection preparation together.
+Your PC must be connected to Your dot and online with the ChatGPT app open.
 
 Google Calendar is optional and requires your own Desktop OAuth client ID in
 the widget settings. This ZIP does not contain account credentials or events.

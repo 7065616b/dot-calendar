@@ -12,9 +12,14 @@ cargo test --locked
 cargo clippy --locked --all-targets -- -D warnings
 ./scripts/build.ps1
 ./scripts/smoke.ps1
+./scripts/test-dot-connection.ps1
 ```
 
 The smoke script uses isolated data beneath `qa-data`. For manual UI tests, set `DOT_CALENDAR_DATA_DIR` to a separate test directory and `DOT_CALENDAR_WINDOWED=1` for a normal window. Never use personal calendar data in tests, issues, screenshots, or commits.
+
+## Windows installer
+
+Install the official Inno Setup compiler (6.3 or newer), then run `./scripts/build-installer.ps1 -CompilerPath '<path to ISCC.exe>'` after a release build. The script creates the portable ZIP and per-user installer from the same verified payload. The installer prepares the local Dot connection automatically; it does not configure the user's cloud account or memory. Test with isolated `USERPROFILE` and `DOT_CALENDAR_DATA_DIR` values before installing against personal data.
 
 ## Design constraints
 

@@ -1,5 +1,5 @@
 use crate::{
-    calendar_info, desktop, google,
+    calendar_info, desktop, dot_connection, google,
     model::{for_each_occurrence, Date, Event},
     preferences::{self, Preferences},
     store::Store,
@@ -65,6 +65,7 @@ const DETAILS: i32 = 44;
 const SHOW_GOOGLE: i32 = 45;
 const VIEW: i32 = 46;
 const AGENDA: i32 = 47;
+const DOT: i32 = 48;
 const PALETTE: [(&str, &str); 6] = [
     ("기본", ""),
     ("파랑", "#DCEBFA"),
@@ -492,7 +493,7 @@ impl App {
             [0u16].as_ptr(),
             [0u16].as_ptr(),
         );
-        for (id, title) in [(VIEW, "전체 메모"), (AGENDA, "하루 일정")] {
+        for (id, title) in [(VIEW, "전체 메모"), (AGENDA, "하루 일정"), (DOT, "Dot")] {
             self.buttons.push((
                 id,
                 control(
@@ -532,10 +533,14 @@ impl App {
                 );
                 continue;
             }
-            if *id == VIEW || *id == AGENDA {
+            if *id == VIEW || *id == AGENDA || *id == DOT {
                 MoveWindow(
                     *h,
-                    self.px(if *id == VIEW { 260 } else { 358 }),
+                    self.px(match *id {
+                        VIEW => 260,
+                        AGENDA => 358,
+                        _ => 456,
+                    }),
                     self.px(40),
                     self.px(90),
                     self.px(19),
@@ -1134,6 +1139,7 @@ unsafe fn popup(hwnd: HWND, cell: Option<usize>) {
             AppendMenuW(menu, MF_SEPARATOR, 0, null());
         }
         for (id, t) in [
+            (DOT, "Dot · 간편 연결"),
             (SETTINGS, "설정"),
             (CONNECT, "Google 계정 연결"),
             (DISCONNECT, "이 PC의 Google 연결 해제"),
@@ -1618,6 +1624,11 @@ unsafe fn command(hwnd: HWND, id: i32) {
         return;
     }
     match id {
+        DOT => {
+            if let Err(error) = dot_connection::show(hwnd) {
+                message(hwnd, "닷 연결 준비", &error, MB_OK | MB_ICONWARNING);
+            }
+        }
         VIEW => view_selected(hwnd),
         AGENDA => view_day(hwnd),
         INLINE_SAVE_ID => {
@@ -3444,6 +3455,9 @@ unsafe extern "system" fn controller_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: 
             .unwrap_or(null_mut());
         if !widget.is_null() && IsWindow(widget) != 0 {
             command(widget, SHOW);
+            if wp == DOT as usize {
+                PostMessageW(widget, WM_COMMAND, DOT as usize, 0);
+            }
         } else {
             PostMessageW(hwnd, REBUILD_WIDGET, 0, 0);
         }
@@ -3509,7 +3523,66 @@ unsafe extern "system" fn controller_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: 
     DefWindowProcW(hwnd, msg, wp, lp)
 }
 
-pub fn run() -> Result<(), String> {
+pub fn shutdown() -> Result<(), String> {
+    unsafe extern "system" fn find_widget(hwnd: HWND, data: LPARAM) -> i32 {
+        let state = &mut *(data as *mut (u32, HWND));
+        let mut pid = 0;
+        GetWindowThreadProcessId(hwnd, &mut pid);
+        if pid == state.0 {
+            let mut name = [0u16; 64];
+            let len = GetClassNameW(hwnd, name.as_mut_ptr(), name.len() as i32);
+            if len > 0
+                && name[..len as usize] == "DotCalendarWidget".encode_utf16().collect::<Vec<_>>()
+            {
+                state.1 = hwnd;
+                return 0;
+            }
+        }
+        1
+    }
+    unsafe {
+        let store = Store::open()?;
+        let controller = FindWindowW(
+            w("DotCalendarController").as_ptr(),
+            w(store.change_event_name()).as_ptr(),
+        );
+        if controller.is_null() {
+            return Ok(());
+        }
+        let mut state: (u32, HWND) = (0u32, null_mut());
+        GetWindowThreadProcessId(controller, &mut state.0);
+        EnumChildWindows(
+            GetDesktopWindow(),
+            Some(find_widget),
+            &mut state as *mut _ as isize,
+        );
+        if state.1.is_null() || IsWindowEnabled(state.1) == 0 {
+            return Err("열려 있는 달력 대화창을 닫고 다시 설치해 주세요.".into());
+        }
+        let process = OpenProcess(PROCESS_SYNCHRONIZE, 0, state.0);
+        if process.is_null() {
+            return Err("달력 종료 상태를 확인할 수 없습니다.".into());
+        }
+        let sent = SendMessageTimeoutW(
+            state.1,
+            WM_COMMAND,
+            QUIT as usize,
+            0,
+            SMTO_ABORTIFHUNG,
+            3000,
+            null_mut(),
+        );
+        let ended = sent != 0 && WaitForSingleObject(process, 10000) == WAIT_OBJECT_0;
+        CloseHandle(process);
+        if ended {
+            Ok(())
+        } else {
+            Err("달력의 저장 또는 종료가 완료되지 않았습니다. 달력에서 확인한 뒤 다시 설치해 주세요.".into())
+        }
+    }
+}
+
+pub fn run(open_dot: bool) -> Result<(), String> {
     unsafe {
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         let store = Store::open()?;
@@ -3531,7 +3604,7 @@ pub fn run() -> Result<(), String> {
                 w(store.change_event_name()).as_ptr(),
             );
             if !h.is_null() {
-                PostMessageW(h, SHOW_WIDGET, 0, 0);
+                PostMessageW(h, SHOW_WIDGET, if open_dot { DOT as usize } else { 0 }, 0);
             }
             CloseHandle(mutex);
             return Ok(());
@@ -3628,6 +3701,9 @@ pub fn run() -> Result<(), String> {
             ReleaseMutex(mutex);
             CloseHandle(mutex);
             return Err(error);
+        }
+        if open_dot {
+            PostMessageW(state.borrow().hwnd, WM_COMMAND, DOT as usize, 0);
         }
         let mut msg: MSG = zeroed();
         'events: loop {
