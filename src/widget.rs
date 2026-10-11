@@ -1815,6 +1815,13 @@ unsafe fn command(hwnd: HWND, id: i32) {
             (*ptr).borrow_mut().persist();
         }
         SHOW => {
+            // Closing normally hides this process. Re-read on show so a missed
+            // change notification cannot leave its cached calendar empty/stale.
+            {
+                let mut app = (*ptr).borrow_mut();
+                app.refresh();
+                app.redraw();
+            }
             ShowWindow(hwnd, SW_SHOWNORMAL);
             if !desktop::is_attached(hwnd) {
                 SetForegroundWindow(hwnd);

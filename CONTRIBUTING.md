@@ -17,6 +17,12 @@ cargo clippy --locked --all-targets -- -D warnings
 
 The smoke script uses isolated data beneath `qa-data`. For manual UI tests, set `DOT_CALENDAR_DATA_DIR` to a separate test directory and `DOT_CALENDAR_WINDOWED=1` for a normal window. Never use personal calendar data in tests, issues, screenshots, or commits.
 
+For calendar persistence and hide/show regressions, run the GUI lifecycle check on an interactive Windows desktop. It creates 89 fictional events in a new directory, checks their contents and calendar hashes across saves and restarts, and retains bitmap and JSON evidence. `-SimulateMissedNotification` also verifies that reopening an empty cached calendar reloads all saved events. Add `-Desktop` to exercise Explorer attachment.
+
+```powershell
+./scripts/test-widget-lifecycle.ps1 -ExePath ./target/release/dot-calendar.exe -DataDir (Join-Path $PWD ('qa-data/lifecycle-' + [guid]::NewGuid().ToString('N'))) -SimulateMissedNotification
+```
+
 ## Windows installer
 
 Install the official Inno Setup compiler (6.3 or newer), then run `./scripts/build-installer.ps1 -CompilerPath '<path to ISCC.exe>'` after a release build. The script creates the portable ZIP and per-user installer from the same verified payload. The installer prepares the local Dot connection automatically; it does not configure the user's cloud account or memory. Test with isolated `USERPROFILE` and `DOT_CALENDAR_DATA_DIR` values before installing against personal data.

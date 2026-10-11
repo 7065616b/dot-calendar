@@ -1201,6 +1201,148 @@ mod tests {
     }
 
     #[test]
+    fn repeated_drop_and_reopen_preserves_89_events_and_completed_changes() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let store = test_store();
+        let path = store.path.clone();
+        let directory = path.parent().unwrap().to_owned();
+        let mut expected = Vec::new();
+        for index in 0..89 {
+            expected.push(
+                store
+                    .create_event_with_details(
+                        "2026-10-11",
+                        Some("18:00"),
+                        &format!("Synthetic event {index:03}"),
+                        &format!("Synthetic note {index:03}\nSecond line"),
+                        Some(&format!("reopen-{index:03}")),
+                        index % 3 == 0,
+                        Some("#123456"),
+                        (index % 2 == 0).then_some("weekly"),
+                        Some(15),
+                    )
+                    .unwrap(),
+            );
+        }
+        let mut saved = fs::read(&path).unwrap();
+        drop(store);
+        assert_eq!(fs::read(&path).unwrap(), saved);
+
+        for cycle in 0..4 {
+            let reopened = Store::open_at(path.clone()).unwrap();
+            assert_eq!(reopened.list_events(None).unwrap(), expected);
+            assert_eq!(fs::read(&path).unwrap(), saved);
+
+            let index = 88 - cycle;
+            let snapshot = expected[index].clone();
+            expected[index] = reopened
+                .patch_details_expected(
+                    &snapshot.id,
+                    Some(!snapshot.completed),
+                    None,
+                    None,
+                    None,
+                    Some(&snapshot),
+                )
+                .unwrap();
+            saved = fs::read(&path).unwrap();
+            drop(reopened);
+            assert_eq!(fs::read(&path).unwrap(), saved);
+        }
+
+        let reopened = Store::open_at(path).unwrap();
+        assert_eq!(reopened.list_events(None).unwrap(), expected);
+        drop(reopened);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn failed_atomic_replace_preserves_original_and_cleans_temporary_file() {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Foundation::WAIT_TIMEOUT;
+        use windows_sys::Win32::Storage::FileSystem::{FILE_SHARE_READ, FILE_SHARE_WRITE};
+
+        let _guard = TEST_LOCK.lock().unwrap();
+        let store = test_store();
+        let original =
+            create_basic_event(&store, "2026-10-11", None, "Keep original", "", None).unwrap();
+        let before = fs::read(&store.path).unwrap();
+        assert_eq!(
+            unsafe { WaitForSingleObject(store.changed, 0) },
+            WAIT_OBJECT_0
+        );
+        // A reader allowing reads and writes, but not deletion, blocks the final
+        // atomic replacement after the new temporary file has been flushed.
+        let reader = OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+            .open(&store.path)
+            .unwrap();
+        let error = store
+            .patch_details_expected(&original.id, Some(true), None, None, None, Some(&original))
+            .unwrap_err();
+        assert!(error.starts_with("cannot replace calendar: "), "{error}");
+        assert_eq!(fs::read(&store.path).unwrap(), before);
+        assert_eq!(store.list_events(None).unwrap(), vec![original.clone()]);
+        assert_eq!(
+            unsafe { WaitForSingleObject(store.changed, 0) },
+            WAIT_TIMEOUT
+        );
+        let directory = store.path.parent().unwrap().to_owned();
+        assert_eq!(fs::read_dir(&directory).unwrap().count(), 1);
+        drop(reader);
+
+        let updated = store
+            .patch_details_expected(&original.id, Some(true), None, None, None, Some(&original))
+            .unwrap();
+        let path = store.path.clone();
+        drop(store);
+        let reopened = Store::open_at(path).unwrap();
+        assert_eq!(reopened.list_events(None).unwrap(), vec![updated]);
+        drop(reopened);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn separate_store_preserves_external_additions_and_rejects_stale_details() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let store = test_store();
+        let original =
+            create_basic_event(&store, "2026-10-11", None, "Original", "", None).unwrap();
+        let external = Store::open_at(store.path.clone()).unwrap();
+        let edited = external
+            .patch_details_expected(&original.id, Some(true), None, None, None, Some(&original))
+            .unwrap();
+        let externally_added =
+            create_basic_event(&external, "2026-10-11", None, "External", "", None).unwrap();
+        let locally_added =
+            create_basic_event(&store, "2026-10-11", None, "Local", "", None).unwrap();
+        let saved = fs::read(&store.path).unwrap();
+        assert_eq!(
+            store
+                .patch_details_expected(
+                    &original.id,
+                    Some(false),
+                    None,
+                    None,
+                    None,
+                    Some(&original),
+                )
+                .unwrap_err(),
+            "event changed since it was read"
+        );
+        assert_eq!(fs::read(&store.path).unwrap(), saved);
+        assert_eq!(
+            store.list_events(None).unwrap(),
+            vec![externally_added, locally_added, edited]
+        );
+        let directory = store.path.parent().unwrap().to_owned();
+        drop(external);
+        drop(store);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn deleted_event_survives_reopen_and_restores_exact_details() {
         let _guard = TEST_LOCK.lock().unwrap();
         let store = test_store();
