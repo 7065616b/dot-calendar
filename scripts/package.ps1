@@ -180,7 +180,7 @@ $index.Add("Rust standard library notices and license texts from $rustVersion ar
 [IO.File]::WriteAllLines((Join-Path $licenseRoot 'INDEX.md'), $index, [Text.UTF8Encoding]::new($false))
 
 $quickstart = @'
-Dot Calendar portable preview
+AI Calendar (AI 캘린더) portable preview
 
 1. Extract this entire ZIP, then run dot-calendar.exe to open the desktop widget.
 2. Click AI 연결 in the calendar and select the preparation you need.

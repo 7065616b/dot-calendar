@@ -373,8 +373,7 @@ fn browser_response(stream: &mut std::net::TcpStream, success: bool) -> std::io:
     } else {
         "인증 상태가 일치하지 않습니다. 달력으로 돌아가 다시 시도하세요."
     };
-    let html =
-        format!("<!doctype html><meta charset=utf-8><title>Dot Calendar</title><p>{body}</p>");
+    let html = format!("<!doctype html><meta charset=utf-8><title>AI 캘린더</title><p>{body}</p>");
     write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n{}", html.len(), html)
 }
 

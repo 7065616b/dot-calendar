@@ -2,6 +2,7 @@
 
 mod calendar_info;
 mod cli;
+mod composition;
 #[cfg(feature = "contest-startup")]
 mod contest_startup;
 mod data_paths;
@@ -12,6 +13,7 @@ mod mcp;
 mod model;
 mod preferences;
 mod store;
+mod ui_design;
 mod widget;
 
 fn main() {

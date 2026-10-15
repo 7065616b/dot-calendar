@@ -1,3 +1,29 @@
+#pragma code_page(65001)
+#include <winver.h>
 #define RT_MANIFEST 24
 1 RT_MANIFEST "app.manifest"
 101 ICON "app.ico"
+1 VERSIONINFO
+FILEVERSION 0,3,18,0
+PRODUCTVERSION 0,3,18,0
+FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "041204B0"
+    BEGIN
+      VALUE "FileDescription", L"AI \xCE98\xB9B0\xB354\0"
+      VALUE "ProductName", L"AI \xCE98\xB9B0\xB354\0"
+      VALUE "FileVersion", "0.3.18\0"
+      VALUE "ProductVersion", "0.3.18\0"
+      VALUE "InternalName", "dot-calendar\0"
+      VALUE "OriginalFilename", "dot-calendar.exe\0"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x0412, 1200
+  END
+END

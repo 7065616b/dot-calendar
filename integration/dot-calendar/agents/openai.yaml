@@ -1,5 +1,5 @@
 interface:
-  display_name: "Dot Calendar"
+  display_name: "AI 캘린더"
   short_description: "짧은 말로 바탕화면 일정 추가·변경·조회"
   default_prompt: "오늘 일정 알려줘"
 policy:

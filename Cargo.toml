@@ -1,8 +1,8 @@
 [package]
 name = "dot-calendar"
-version = "0.3.17"
+version = "0.3.18"
 edition = "2021"
-description = "A quiet, native Windows calendar for Your dot"
+description = "AI 캘린더: a native Windows calendar with a local AI-tool connection"
 license = "MIT"
 repository = "https://github.com/7065616b/dot-calendar"
 homepage = "https://7065616b.github.io/dot-calendar/"

@@ -8,10 +8,10 @@
 
 [Setup]
 AppId=DotCalendar.7065616b
-AppName=Dot Calendar
+AppName=AI 캘린더
 AppVersion={#AppVersion}
-AppVerName=Dot Calendar {#AppVersion}
-AppPublisher=Dot Calendar contributors
+AppVerName=AI 캘린더 {#AppVersion}
+AppPublisher=AI 캘린더 contributors
 AppPublisherURL=https://github.com/7065616b/dot-calendar
 AppSupportURL=https://github.com/7065616b/dot-calendar/issues
 AppUpdatesURL=https://github.com/7065616b/dot-calendar/releases
@@ -26,7 +26,9 @@ DisableProgramGroupPage=yes
 DisableReadyPage=yes
 WizardStyle=modern
 ShowLanguageDialog=auto
-CloseApplications=yes
+; PrepareToInstall requests the application's normal shutdown and aborts if it
+; refuses. Do not add Restart Manager's forced-close fallback.
+CloseApplications=no
 RestartApplications=no
 Compression=lzma2
 SolidCompression=yes
@@ -38,12 +40,12 @@ Name: "en"; MessagesFile: "compiler:Default.isl"
 Name: "ko"; MessagesFile: "compiler:Languages\Korean.isl"
 
 [CustomMessages]
-en.CloseForUpdate=Dot Calendar could not close for this update. Close it and retry.
-ko.CloseForUpdate=업데이트를 위해 Dot Calendar를 종료할 수 없습니다. 앱을 닫고 다시 시도해 주세요.
-en.CloseForUninstall=Dot Calendar could not close. Finish editing in the calendar and retry uninstalling.
-ko.CloseForUninstall=Dot Calendar를 종료하지 못했습니다. 달력에서 편집을 마친 뒤 제거를 다시 시도해 주세요.
-en.ConnectFailed=Dot Calendar was installed, but the local skill could not be prepared. Open AI connection and choose the local-skill preparation action to retry.
-ko.ConnectFailed=Dot Calendar 설치는 완료됐지만 로컬 스킬 준비는 끝내지 못했습니다. 앱의 AI 연결에서 기존 Dot 연결 준비를 선택해 다시 시도해 주세요.
+en.CloseForUpdate=AI Calendar could not close for this update. Close it and retry.
+ko.CloseForUpdate=업데이트를 위해 AI 캘린더를 종료할 수 없습니다. 앱을 닫고 다시 시도해 주세요.
+en.CloseForUninstall=AI Calendar could not close. Finish editing in the calendar and retry uninstalling.
+ko.CloseForUninstall=AI 캘린더를 종료하지 못했습니다. 달력에서 편집을 마친 뒤 제거를 다시 시도해 주세요.
+en.ConnectFailed=AI Calendar was installed, but the local skill could not be prepared. Open AI connection and choose the local-skill preparation action to retry.
+ko.ConnectFailed=AI 캘린더 설치는 완료됐지만 로컬 스킬 준비는 끝내지 못했습니다. 앱의 AI 연결에서 기존 Dot 연결 준비를 선택해 다시 시도해 주세요.
 
 [Files]
 ; The portable archive is assembled from an explicit allowlist. The installer
@@ -54,10 +56,12 @@ Source: "{#SourceDir}\dot-calendar.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\*"; Excludes: "dot-calendar.exe,QUICKSTART.txt"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 
 [Icons]
-Name: "{userprograms}\Dot Calendar"; Filename: "{app}\dot-calendar.exe"; WorkingDir: "{app}"
+Name: "{userprograms}\AI 캘린더"; Filename: "{app}\dot-calendar.exe"; WorkingDir: "{app}"; Comment: "AI 캘린더"
+; Preserve existing links and pins while exposing the new display name.
+Name: "{userprograms}\Dot Calendar"; Filename: "{app}\dot-calendar.exe"; WorkingDir: "{app}"; Comment: "AI 캘린더 - 기존 바로가기"
 
 [Run]
-Filename: "{app}\dot-calendar.exe"; Parameters: "--dot-onboarding"; Description: "{cm:LaunchProgram,Dot Calendar}"; Flags: postinstall nowait skipifsilent
+Filename: "{app}\dot-calendar.exe"; Parameters: "--dot-onboarding"; Description: "{cm:LaunchProgram,AI 캘린더}"; Flags: postinstall nowait skipifsilent
 
 [UninstallRun]
 ; The app removes its own skill only if that skill still points at this install.

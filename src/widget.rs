@@ -32,6 +32,8 @@ use windows_sys::Win32::{
     },
 };
 
+mod native_ui;
+
 const RELOAD: u32 = crate::store::STORE_CHANGED;
 const APP_ICON_RESOURCE_ID: usize = 101;
 const SYNC_DONE: u32 = WM_APP + 2;
@@ -502,14 +504,41 @@ struct App {
     pending: Option<(String, String, i64)>,
     taskbar_created: u32,
     quitting: bool,
+    ui: native_ui::UiState,
 }
 impl App {
+    unsafe fn update_dpi(&mut self, dpi: u32) {
+        self.dpi = dpi;
+        self.fonts = Fonts::new(dpi);
+        for (_, h) in &self.buttons {
+            SendMessageW(*h, WM_SETFONT, self.fonts.body as usize, 0);
+        }
+        if let Some(editor) = &self.inline {
+            SendMessageW(editor.hwnd, WM_SETFONT, self.fonts.body as usize, 1);
+        }
+    }
     fn px(&self, v: i32) -> i32 {
         v * self.dpi as i32 / 96
     }
     fn colors(&self) -> (u32, u32, u32, u32) {
+        if unsafe { native_ui::contrast_mode() } {
+            return unsafe {
+                (
+                    GetSysColor(COLOR_WINDOW),
+                    GetSysColor(COLOR_WINDOWTEXT),
+                    GetSysColor(COLOR_WINDOWTEXT),
+                    GetSysColor(COLOR_WINDOWTEXT),
+                )
+            };
+        }
         if self.prefs.dark {
-            (0x003a332b, 0x00f5eee6, 0x00c8bcb0, 0x0062564d)
+            use crate::ui_design::*;
+            (
+                BG_CANVAS,
+                TEXT_PRIMARY,
+                TEXT_SECONDARY,
+                blend(BORDER_SUBTLE.0, BG_SURFACE, BORDER_SUBTLE.1),
+            )
         } else {
             (0x00f2ece4, 0x00332a22, 0x008a7562, 0x00d6c8b8)
         }
@@ -523,9 +552,9 @@ impl App {
         let r = self.client();
         rect(
             self.px(16),
-            self.px(84),
+            self.px(110),
             r.right - self.px(32),
-            r.bottom - self.px(116),
+            r.bottom - self.px(142),
         )
     }
     fn cell_rect(g: RECT, i: usize) -> RECT {
@@ -542,6 +571,9 @@ impl App {
         ((r.bottom - r.top - self.px(38)) / self.px(23)).max(0) as usize
     }
     unsafe fn hit(&self, x: i32, y: i32) -> Option<(usize, Option<usize>)> {
+        if self.ui.view != crate::ui_design::View::Calendar {
+            return None;
+        }
         let grid = self.grid();
         for i in 0..self.cells.len() {
             let mut r = Self::cell_rect(grid, i);
@@ -616,6 +648,7 @@ impl App {
                 ),
             ));
         }
+        native_ui::init(self);
         self.layout();
         if !self.refresh() {
             self.arm_reminders();
@@ -639,11 +672,14 @@ impl App {
         let r = self.client();
         let mut x = r.right - self.px(20);
         for (id, h) in self.buttons.iter().rev() {
+            if native_ui::custom_id(*id) {
+                continue;
+            }
             if *id == SHOW_GOOGLE {
                 MoveWindow(
                     *h,
                     r.right - self.px(178),
-                    self.px(40),
+                    self.px(51),
                     self.px(158),
                     self.px(19),
                     1,
@@ -654,13 +690,13 @@ impl App {
                 MoveWindow(
                     *h,
                     self.px(match *id {
-                        VIEW => 260,
+                        VIEW => 326,
                         AGENDA => 358,
-                        _ => 456,
+                        _ => 408,
                     }),
-                    self.px(40),
-                    self.px(90),
-                    self.px(19),
+                    self.px(44),
+                    self.px(80),
+                    self.px(34),
                     1,
                 );
                 continue;
@@ -676,6 +712,7 @@ impl App {
             MoveWindow(*h, x, self.px(8), self.px(ww), self.px(28), 1);
             x -= self.px(6);
         }
+        native_ui::layout(self);
         if let Some(editor) = &self.inline {
             if let Some(i) = self.cells.iter().position(|cell| cell.date == editor.date) {
                 let panel = self.inline_panel_rect(i);
@@ -734,6 +771,7 @@ impl App {
         InvalidateRect(self.hwnd, null(), 0);
     }
     unsafe fn redraw_selection(&self, previous: Date) {
+        PostMessageW(self.hwnd, native_ui::VIEW_REFRESH, 0, 0);
         let grid = self.grid();
         for (i, cell) in self.cells.iter().enumerate() {
             if cell.date == previous || cell.date == self.selected {
@@ -834,6 +872,7 @@ impl App {
             end,
             self.prefs.show_google,
         );
+        PostMessageW(self.hwnd, native_ui::VIEW_REFRESH, 0, 0);
         self.redraw();
     }
     unsafe fn arm_reminders(&mut self) {
@@ -867,48 +906,11 @@ impl App {
     unsafe fn paint(&self, dc: HDC) {
         let r = self.client();
         let (bg, ink, muted, border) = self.colors();
-        let high_contrast = high_contrast();
+        let high_contrast = native_ui::contrast_mode();
         fill(dc, r, bg);
-        let header = rect(0, 0, r.right, self.px(60));
-        if RectVisible(dc, &header) != 0 {
-            fill(
-                dc,
-                rect(0, 0, r.right, self.px(38)),
-                if self.prefs.dark {
-                    0x00363029
-                } else {
-                    0x00eae3da
-                },
-            );
-            fill(
-                dc,
-                rect(0, self.px(38), r.right, self.px(22)),
-                if self.prefs.dark {
-                    0x003e362d
-                } else {
-                    0x00f5f0ea
-                },
-            );
-            text(
-                dc,
-                &format!("{}년 {}월", self.month.year, self.month.month),
-                rect(self.px(22), self.px(8), self.px(265), self.px(28)),
-                self.fonts.strong,
-                ink,
-                DT_LEFT,
-            );
-            text(
-                dc,
-                if self.prefs.locked {
-                    "위치 고정됨"
-                } else {
-                    "헤더를 끌어서 이동"
-                },
-                rect(self.px(24), self.px(40), self.px(220), self.px(19)),
-                self.fonts.small,
-                muted,
-                DT_LEFT,
-            );
+        native_ui::paint_header(self, dc);
+        if native_ui::paint_content(self, dc) {
+            return;
         }
         let grid = self.grid();
         let today = Date::today();
@@ -927,7 +929,7 @@ impl App {
             let cr = Self::cell_rect(grid, i);
             let weekday_rect = rect(
                 cr.left + self.px(1),
-                self.px(62),
+                self.px(88),
                 cr.right - cr.left - self.px(2),
                 self.px(20),
             );
@@ -939,7 +941,9 @@ impl App {
                 name,
                 weekday_rect,
                 self.fonts.small,
-                if self.prefs.dark && i == 0 {
+                if high_contrast {
+                    ink
+                } else if self.prefs.dark && i == 0 {
                     0x00bcd9f2
                 } else if self.prefs.dark && i == 6 {
                     0x00e6d9c8
@@ -970,19 +974,41 @@ impl App {
                 .day_colors
                 .get(&cell.date_key)
                 .and_then(|v| color(v));
-            let cell_bg = tint.unwrap_or(
-                match (self.prefs.dark, selected, i % 7 == 0 || i % 7 == 6) {
-                    (true, true, _) => 0x00604a36,
-                    (true, false, true) => 0x00454240,
-                    (true, false, false) => 0x003e372d,
-                    (false, true, _) => 0x00f9e8d5,
-                    (false, false, _) => 0x00fbf8f4,
+            let cell_bg = if high_contrast {
+                bg
+            } else {
+                tint.unwrap_or(
+                    match (self.prefs.dark, selected, i % 7 == 0 || i % 7 == 6) {
+                        (true, true, _) => crate::ui_design::BG_ELEVATED,
+                        (true, false, true) => crate::ui_design::BG_SURFACE,
+                        (true, false, false) => crate::ui_design::BG_SURFACE,
+                        (false, true, _) => 0x00f9e8d5,
+                        (false, false, _) => 0x00fbf8f4,
+                    },
+                )
+            };
+            fill(dc, cr, cell_bg);
+            line(
+                dc,
+                cr,
+                if selected {
+                    if high_contrast {
+                        GetSysColor(COLOR_HIGHLIGHT)
+                    } else {
+                        0x00d88448
+                    }
+                } else {
+                    border
                 },
             );
-            fill(dc, cr, cell_bg);
-            line(dc, cr, if selected { 0x00d88448 } else { border });
-            let cell_ink = if tint.is_some() { 0x00443527 } else { ink };
-            let holiday_ink = if self.prefs.dark && tint.is_none() {
+            let cell_ink = if tint.is_some() && !high_contrast {
+                0x00443527
+            } else {
+                ink
+            };
+            let holiday_ink = if high_contrast {
+                ink
+            } else if self.prefs.dark && tint.is_none() {
                 0x00bcd9f2
             } else {
                 0x00616bcb
@@ -990,7 +1016,16 @@ impl App {
             let pad = self.px(10);
             let date_r = rect(cr.left + pad, cr.top + self.px(5), self.px(26), self.px(25));
             if cell.date == today {
-                round(dc, date_r, 0x00d47a39, self.px(9));
+                round(
+                    dc,
+                    date_r,
+                    if high_contrast {
+                        GetSysColor(COLOR_HIGHLIGHT)
+                    } else {
+                        0x00d47a39
+                    },
+                    self.px(9),
+                );
             }
             text(
                 dc,
@@ -998,7 +1033,13 @@ impl App {
                 date_r,
                 self.fonts.strong,
                 if cell.date == today {
-                    0x00ffffff
+                    if high_contrast {
+                        GetSysColor(COLOR_HIGHLIGHTTEXT)
+                    } else {
+                        0x00ffffff
+                    }
+                } else if high_contrast {
+                    ink
                 } else if cell.date.month != self.month.month {
                     muted
                 } else if !cell.holiday.is_empty() || i % 7 == 0 {
@@ -1065,7 +1106,11 @@ impl App {
                             self.px(3),
                             er.bottom - er.top - self.px(6),
                         ),
-                        0x00d47a39,
+                        if high_contrast {
+                            GetSysColor(COLOR_HIGHLIGHTTEXT)
+                        } else {
+                            0x00d47a39
+                        },
                     );
                 }
                 let display = event_label(e);
@@ -1208,7 +1253,7 @@ unsafe fn tray(hwnd: HWND, action: u32, message: Option<&str>) {
     n.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
     n.uCallbackMessage = TRAY;
     n.hIcon = GetClassLongPtrW(hwnd, GCLP_HICON) as HICON;
-    let title = w("Dot Calendar");
+    let title = w("AI 캘린더");
     n.szTip[..title.len()].copy_from_slice(&title);
     if let Some(message) = message {
         n.uFlags |= NIF_INFO;
@@ -1232,7 +1277,7 @@ unsafe fn message(parent: HWND, title: &str, body: &str, flags: u32) -> i32 {
 }
 pub fn show_error(s: &str) {
     unsafe {
-        message(null_mut(), "Dot Calendar", s, MB_OK | MB_ICONERROR);
+        message(null_mut(), "AI 캘린더", s, MB_OK | MB_ICONERROR);
     }
 }
 
@@ -1274,6 +1319,8 @@ unsafe fn popup(hwnd: HWND, cell: Option<usize>) {
             AppendMenuW(menu, MF_POPUP, colors as usize, w("날짜 배경색").as_ptr());
         } else {
             for (id, t) in [
+                (native_ui::OPEN_PALETTE, "명령 검색 (Ctrl+K)"),
+                (native_ui::SHOWCASE, "네이티브 컴포넌트 체험"),
                 (DOT, "AI 연결 (Claude · Gemini · ChatGPT)"),
                 (UNDO_DELETE, "마지막 삭제 되돌리기"),
                 (SETTINGS, "설정"),
@@ -1350,7 +1397,10 @@ unsafe extern "system" fn inline_edit_proc(
     match msg {
         WM_IME_STARTCOMPOSITION => keys.composing = true,
         WM_IME_ENDCOMPOSITION => keys.composing = false,
-        WM_KILLFOCUS if !keys.buttons.contains(&(wp as HWND)) => {
+        WM_KILLFOCUS
+            if !keys.buttons.contains(&(wp as HWND))
+                && wp as HWND != GetDlgItem(keys.parent, native_ui::OPEN_PALETTE) =>
+        {
             PostMessageW(keys.parent, INLINE_COMMIT, hwnd as usize, 0);
         }
         WM_KEYDOWN if !keys.composing && wp as u16 == VK_ESCAPE => {
@@ -1750,6 +1800,10 @@ unsafe fn view_day(hwnd: HWND) {
 
 unsafe fn command(hwnd: HWND, id: i32) {
     let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const RefCell<App>;
+    if native_ui::command(hwnd, id) {
+        return;
+    }
+    native_ui::prepare_existing(hwnd, id);
     #[cfg(feature = "contest-startup")]
     if id != QUIT {
         if let Err(error) = crate::contest_startup::start() {
@@ -1926,7 +1980,7 @@ unsafe fn command(hwnd: HWND, id: i32) {
             apply_preferences(hwnd);
         }
         ABOUT => {
-            message(hwnd,concat!("Dot Calendar ", env!("CARGO_PKG_VERSION")),&format!("날짜 칸에서 더블클릭, F2 또는 Enter로 메모를 작성합니다.\nCtrl+Enter 또는 바깥 클릭으로 저장하고 Esc로 취소합니다.\n우클릭의 세부 설정에서 날짜·시간·반복·색상·알림을 수정합니다.\n완료 상태는 닷 또는 우클릭 메뉴에서 관리합니다.\n설정 저장 후 메뉴에서 Google 계정에 연결하세요.\n\n{}\n\n알림은 달력이 실행 중일 때 표시됩니다.",calendar_info::HOLIDAY_DATA_NOTE),MB_OK|MB_ICONINFORMATION);
+            message(hwnd,concat!("AI 캘린더 ", env!("CARGO_PKG_VERSION")),&format!("날짜 칸에서 더블클릭, F2 또는 Enter로 메모를 작성합니다.\nCtrl+Enter 또는 바깥 클릭으로 저장하고 Esc로 취소합니다.\n우클릭의 세부 설정에서 날짜·시간·반복·색상·알림을 수정합니다.\n완료 상태는 닷 또는 우클릭 메뉴에서 관리합니다.\n설정 저장 후 메뉴에서 Google 계정에 연결하세요.\n\n{}\n\n알림은 달력이 실행 중일 때 표시됩니다.",calendar_info::HOLIDAY_DATA_NOTE),MB_OK|MB_ICONINFORMATION);
         }
         MENU => popup(hwnd, None),
         CONNECT | SYNC => start_sync(hwnd, id == CONNECT),
@@ -2082,6 +2136,9 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPAR
     if ptr.is_null() {
         return DefWindowProcW(hwnd, msg, wp, lp);
     }
+    if let Some(result) = native_ui::before_message(hwnd, msg, wp, lp) {
+        return result;
+    }
     if msg == WM_CLOSE {
         if !commit_inline(hwnd) {
             return 0;
@@ -2096,6 +2153,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPAR
         return 0;
     }
     if msg == WM_DESTROY {
+        native_ui::cleanup(hwnd);
         // Explorer destroys child controls too. Never read a stale EDIT handle as
         // an empty draft after rebuilding: that could delete its original note.
         if let Ok(mut app) = (*ptr).try_borrow_mut() {
@@ -2118,6 +2176,9 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPAR
         return 0;
     }
     if msg == INLINE_COMMIT || msg == INLINE_CANCEL {
+        if msg == INLINE_COMMIT && (*ptr).borrow().ui.palette_open {
+            return 0;
+        }
         let is_current = (*ptr)
             .borrow()
             .inline
@@ -2133,8 +2194,11 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPAR
         return 0;
     }
     if msg == WM_ACTIVATE && (wp & 0xffff) == WA_INACTIVE as usize {
-        if let Some(editor) = (*ptr).borrow().inline.as_ref() {
-            PostMessageW(hwnd, INLINE_COMMIT, editor.hwnd as usize, 0);
+        let a = (*ptr).borrow();
+        if !a.ui.palette_open {
+            if let Some(editor) = a.inline.as_ref() {
+                PostMessageW(hwnd, INLINE_COMMIT, editor.hwnd as usize, 0);
+            }
         }
     }
     if msg == WM_COMMAND && (wp >> 16) == BN_CLICKED as usize {
@@ -2309,14 +2373,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPAR
         let dpi = (wp & 0xffff) as u32;
         {
             let mut a = (*ptr).borrow_mut();
-            a.dpi = dpi;
-            a.fonts = Fonts::new(dpi);
-            for (_, h) in &a.buttons {
-                SendMessageW(*h, WM_SETFONT, a.fonts.body as usize, 0);
-            }
-            if let Some(editor) = &a.inline {
-                SendMessageW(editor.hwnd, WM_SETFONT, a.fonts.body as usize, 1);
-            }
+            a.update_dpi(dpi);
         }
         if !desktop::is_attached(hwnd) {
             let r = &*(lp as *const RECT);
@@ -2337,7 +2394,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPAR
         return DefWindowProcW(hwnd, msg, wp, lp);
     };
     match msg {
-        WM_CTLCOLORSTATIC | WM_CTLCOLORBTN => {
+        WM_CTLCOLORSTATIC | WM_CTLCOLORBTN | WM_CTLCOLOREDIT | WM_CTLCOLORLISTBOX => {
             let (bg, ink, _, _) = a.colors();
             let dc = wp as HDC;
             SetTextColor(dc, ink);
@@ -2391,57 +2448,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPAR
             0
         }
         WM_DRAWITEM => {
-            let item = &*(lp as *const DRAWITEMSTRUCT);
-            let (bg, ink, muted, border) = a.colors();
-            let pressed = item.itemState & ODS_SELECTED != 0;
-            let focused = item.itemState & ODS_FOCUS != 0;
-            let primary = item.CtlID == ADD as u32;
-            let button_bg = if primary {
-                if pressed {
-                    0x00b8662d
-                } else {
-                    0x00d47a39
-                }
-            } else if a.prefs.dark {
-                if pressed {
-                    0x005d5149
-                } else {
-                    0x00453c35
-                }
-            } else if pressed {
-                0x00d9d1c8
-            } else {
-                0x00f9f7f5
-            };
-            fill(item.hDC, item.rcItem, bg);
-            round(
-                item.hDC,
-                item.rcItem,
-                if focused { 0x00d47a39 } else { border },
-                a.px(17),
-            );
-            let inset = a.px(if focused { 2 } else { 1 });
-            let inner = RECT {
-                left: item.rcItem.left + inset,
-                top: item.rcItem.top + inset,
-                right: item.rcItem.right - inset,
-                bottom: item.rcItem.bottom - inset,
-            };
-            round(item.hDC, inner, button_bg, a.px(16));
-            text(
-                item.hDC,
-                &label(item.hwndItem),
-                item.rcItem,
-                a.fonts.body,
-                if item.itemState & ODS_DISABLED != 0 {
-                    muted
-                } else if primary {
-                    0xffffff
-                } else {
-                    ink
-                },
-                DT_CENTER,
-            );
+            native_ui::draw_button(&a, &*(lp as *const DRAWITEMSTRUCT));
             1
         }
         WM_TIMER => {
@@ -3511,7 +3518,7 @@ unsafe fn file_dialog(parent: HWND, open: bool) -> Option<std::path::PathBuf> {
         let name = w("dot-calendar-backup.json");
         buffer[..name.len()].copy_from_slice(&name);
     }
-    let filter = w("Dot Calendar backup (*.json)\0*.json\0\0");
+    let filter = w("AI 캘린더 backup (*.json)\0*.json\0\0");
     let mut ofn: OPENFILENAMEW = zeroed();
     ofn.lStructSize = std::mem::size_of::<OPENFILENAMEW>() as u32;
     ofn.hwndOwner = parent;
@@ -3589,7 +3596,7 @@ unsafe fn print_month(hwnd: HWND) {
     if PrintDlgW(&mut pd) == 0 {
         return;
     }
-    let title = w("Dot Calendar");
+    let title = w("AI 캘린더");
     let info = DOCINFOW {
         cbSize: std::mem::size_of::<DOCINFOW>() as i32,
         lpszDocName: title.as_ptr(),
@@ -3648,7 +3655,7 @@ unsafe fn create_widget(state: &RefCell<App>) -> Result<HWND, String> {
         // Establish the layered surface before desktop::attach can show the child.
         WS_EX_APPWINDOW | WS_EX_LAYERED,
         w("DotCalendarWidget").as_ptr(),
-        w("Dot Calendar").as_ptr(),
+        w("AI 캘린더").as_ptr(),
         WS_POPUP | WS_THICKFRAME | WS_CLIPCHILDREN,
         position[0],
         position[1],
@@ -3951,6 +3958,7 @@ pub fn run(open_dot: bool) -> Result<(), String> {
             return Err("달력 실행 잠금을 얻을 수 없습니다.".into());
         }
         let instance = GetModuleHandleW(null());
+        native_ui::register()?;
         let app_icon = LoadIconW(instance, APP_ICON_RESOURCE_ID as *const u16);
         for (class, proc) in [
             (
@@ -4007,6 +4015,7 @@ pub fn run(open_dot: bool) -> Result<(), String> {
             pending: None,
             taskbar_created: RegisterWindowMessageW(w("TaskbarCreated").as_ptr()),
             quitting: false,
+            ui: native_ui::UiState::new(),
         }));
         let controller_name = w(state.borrow().store.change_event_name());
         let controller = CreateWindowExW(
@@ -4069,6 +4078,10 @@ pub fn run(open_dot: bool) -> Result<(), String> {
             while PeekMessageW(&mut msg, null_mut(), 0, 0, PM_REMOVE) != 0 {
                 if msg.message == WM_QUIT {
                     break 'events;
+                }
+                let widget = state.borrow().hwnd;
+                if native_ui::pretranslate(&msg, widget) {
+                    continue;
                 }
                 TranslateMessage(&msg);
                 DispatchMessageW(&msg);
