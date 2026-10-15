@@ -2,6 +2,7 @@
 
 mod calendar_info;
 mod cli;
+mod data_paths;
 mod desktop;
 mod dot_connection;
 mod google;

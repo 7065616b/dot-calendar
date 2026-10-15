@@ -1,12 +1,11 @@
 use std::collections::HashSet;
-use std::env;
 use std::ffi::OsStr;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::fs::MetadataExt;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, WAIT_ABANDONED, WAIT_OBJECT_0};
@@ -23,6 +22,8 @@ use crate::model::{Date, Event};
 const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_ARCHIVE_BYTES: u64 = 64 * 1024;
 const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+const INITIALIZED_MARKER_NAME: &str = "calendar.initialized";
+const INITIALIZED_MARKER_BYTES: &[u8] = b"DotCalendar initialized v1\n";
 pub const STORE_CHANGED: u32 = WM_APP + 1;
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -56,6 +57,7 @@ pub struct Store {
     mutex: HANDLE,
     changed: HANDLE,
     event_name: String,
+    observed_primary: AtomicBool,
 }
 
 struct LockedMutex(HANDLE);
@@ -68,14 +70,7 @@ impl Drop for LockedMutex {
 
 impl Store {
     pub fn open() -> Result<Self, String> {
-        let directory = match env::var_os("DOT_CALENDAR_DATA_DIR") {
-            Some(value) if !value.is_empty() => PathBuf::from(value),
-            _ => {
-                let local = env::var_os("LOCALAPPDATA")
-                    .ok_or("LOCALAPPDATA is unavailable; set DOT_CALENDAR_DATA_DIR")?;
-                PathBuf::from(local).join("DotCalendar")
-            }
-        };
+        let directory = crate::data_paths::directory()?;
         Self::open_at(directory.join("calendar.json"))
     }
 
@@ -121,6 +116,7 @@ impl Store {
             mutex,
             changed,
             event_name,
+            observed_primary: AtomicBool::new(false),
         };
         // Detect corruption at startup; never overwrite a malformed existing file.
         store.with_lock(|store| store.read_database().map(|_| ()))?;
@@ -148,6 +144,17 @@ impl Store {
                 (&a.date, &a.time, &a.title, &a.id).cmp(&(&b.date, &b.time, &b.title, &b.id))
             });
             Ok(events)
+        })
+    }
+
+    /// Read and validate the entire current file without sorting unrelated rows.
+    pub fn event_by_id(&self, id: &str) -> Result<Option<Event>, String> {
+        self.with_lock(|store| {
+            Ok(store
+                .read_database()?
+                .events
+                .into_iter()
+                .find(|event| event.id == id))
         })
     }
 
@@ -837,9 +844,31 @@ impl Store {
 
     fn read_database(&self) -> Result<Database, String> {
         let file = match File::open(&self.path) {
-            Ok(file) => file,
+            Ok(file) => {
+                // Even a corrupt/unreadable body is evidence that this is not a virgin store.
+                self.observed_primary.store(true, Ordering::Relaxed);
+                file
+            }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(Database::default())
+                // A dangling reparse link is an existing primary path, not a virgin store.
+                // Probe the path itself before interpreting the missing target as no data.
+                match fs::symlink_metadata(&self.path) {
+                    Ok(_) => return Err(
+                        "calendar path exists but cannot be opened; existing data was not replaced"
+                            .into(),
+                    ),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => {
+                        return Err(format!("cannot inspect missing calendar path: {error}"))
+                    }
+                }
+                if self.observed_primary.load(Ordering::Relaxed)
+                    || self.initialized_marker_exists()?
+                    || self.checked_deleted_dir(false)?.is_some()
+                {
+                    return Err("calendar file is missing from an initialized store; existing data was not replaced".into());
+                }
+                return Ok(Database::default());
             }
             Err(error) => return Err(format!("cannot read calendar: {error}")),
         };
@@ -857,6 +886,96 @@ impl Store {
         Self::decode_database(&bytes)
     }
 
+    fn initialized_marker_path(&self) -> PathBuf {
+        self.path
+            .parent()
+            .expect("calendar has a parent")
+            .join(INITIALIZED_MARKER_NAME)
+    }
+
+    fn initialized_marker_exists(&self) -> Result<bool, String> {
+        let path = self.initialized_marker_path();
+        let metadata = match fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => {
+                return Err(format!(
+                    "cannot inspect calendar initialization marker: {error}"
+                ))
+            }
+        };
+        if !metadata.is_file()
+            || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+            || metadata.len() != INITIALIZED_MARKER_BYTES.len() as u64
+        {
+            return Err(
+                "calendar initialization marker is invalid; existing data was not replaced".into(),
+            );
+        }
+        let mut bytes = Vec::with_capacity(INITIALIZED_MARKER_BYTES.len());
+        File::open(path)
+            .map_err(|error| format!("cannot open calendar initialization marker: {error}"))?
+            .take(INITIALIZED_MARKER_BYTES.len() as u64 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|error| format!("cannot read calendar initialization marker: {error}"))?;
+        if bytes != INITIALIZED_MARKER_BYTES {
+            return Err(
+                "calendar initialization marker is invalid; existing data was not replaced".into(),
+            );
+        }
+        Ok(true)
+    }
+
+    /// Called under the same store mutex as the primary write. Never rewrites an existing marker.
+    fn ensure_initialized_marker(&self) -> Result<bool, String> {
+        if self.initialized_marker_exists()? {
+            return Ok(false);
+        }
+        let destination = self.initialized_marker_path();
+        let temp = destination.parent().unwrap().join(format!(
+            ".initialized-{}-{}.tmp",
+            std::process::id(),
+            next_number()
+        ));
+        let mut created_temp = false;
+        let result = (|| {
+            let mut file = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temp)
+                .map_err(|error| {
+                    format!("cannot create calendar initialization marker: {error}")
+                })?;
+            created_temp = true;
+            file.write_all(INITIALIZED_MARKER_BYTES)
+                .map_err(|error| format!("cannot write calendar initialization marker: {error}"))?;
+            file.sync_all()
+                .map_err(|error| format!("cannot flush calendar initialization marker: {error}"))?;
+            drop(file);
+            let moved = unsafe {
+                MoveFileExW(
+                    wide(temp.as_os_str()).as_ptr(),
+                    wide(destination.as_os_str()).as_ptr(),
+                    MOVEFILE_WRITE_THROUGH,
+                )
+            };
+            if moved == 0 {
+                let error = std::io::Error::last_os_error();
+                if self.initialized_marker_exists()? {
+                    return Ok(false);
+                }
+                return Err(format!(
+                    "cannot save calendar initialization marker: {error}"
+                ));
+            }
+            Ok(true)
+        })();
+        if created_temp {
+            let _ = fs::remove_file(temp);
+        }
+        result
+    }
+
     fn decode_database(bytes: &[u8]) -> Result<Database, String> {
         if bytes.len() as u64 > MAX_FILE_BYTES {
             return Err("calendar file exceeds 4 MiB".into());
@@ -870,8 +989,14 @@ impl Store {
                 db.version
             ));
         }
-        let mut ids = HashSet::new();
-        let mut requests = HashSet::new();
+        let mut ids = HashSet::with_capacity(db.events.len());
+        let request_count = db
+            .events
+            .iter()
+            .filter(|event| event.request_id.is_some())
+            .count()
+            + db.retired_request_ids.len();
+        let mut requests = HashSet::with_capacity(request_count);
         for event in &db.events {
             Date::parse(&event.date)
                 .map_err(|_| "calendar contains invalid event date; file was left unchanged")?;
@@ -923,6 +1048,7 @@ impl Store {
             return Err("calendar would exceed 4 MiB; existing data was not changed".into());
         }
         let parent = self.path.parent().ok_or("calendar path has no directory")?;
+        let created_marker = self.ensure_initialized_marker()?;
         let stamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -932,7 +1058,11 @@ impl Store {
             std::process::id(),
             next_number()
         ));
-        let result = (|| {
+        let mut result = (|| {
+            #[cfg(test)]
+            if tests::FAIL_PRIMARY_WRITE.with(|fail| fail.replace(false)) {
+                return Err("synthetic primary write failure".into());
+            }
             let mut file = OpenOptions::new()
                 .write(true)
                 .create_new(true)
@@ -960,7 +1090,17 @@ impl Store {
         })();
         if result.is_err() {
             let _ = fs::remove_file(&temp);
+            if created_marker
+                && !self.observed_primary.load(Ordering::Relaxed)
+                && matches!(fs::symlink_metadata(&self.path), Err(error) if error.kind() == std::io::ErrorKind::NotFound)
+            {
+                if let Err(error) = fs::remove_file(self.initialized_marker_path()) {
+                    let original = result.unwrap_err();
+                    result = Err(format!("{original}; cannot remove this failed first-save initialization marker: {error}"));
+                }
+            }
         } else {
+            self.observed_primary.store(true, Ordering::Relaxed);
             // A failed notification does not turn a successful durable write into a retryable error.
             unsafe {
                 SetEvent(self.changed);
@@ -1007,14 +1147,14 @@ fn valid_time(value: Option<&str>) -> Result<Option<&str>, String> {
 
 fn valid_title(value: &str) -> Result<&str, String> {
     let value = value.trim();
-    if value.is_empty() || value.chars().count() > 200 {
+    if value.is_empty() || (value.len() > 200 && value.chars().count() > 200) {
         return Err("title must contain 1–200 characters".into());
     }
     Ok(value)
 }
 
 fn valid_notes(value: &str) -> Result<(), String> {
-    if value.chars().count() > 4096 {
+    if value.len() > 4096 && value.chars().count() > 4096 {
         return Err("notes cannot exceed 4096 characters".into());
     }
     Ok(())
@@ -1022,7 +1162,7 @@ fn valid_notes(value: &str) -> Result<(), String> {
 
 fn valid_request_id(value: Option<&str>) -> Result<Option<&str>, String> {
     let Some(value) = value else { return Ok(None) };
-    if value.is_empty() || value.chars().count() > 128 {
+    if value.is_empty() || (value.len() > 128 && value.chars().count() > 128) {
         return Err("request-id must contain 1–128 characters".into());
     }
     Ok(Some(value))
@@ -1106,9 +1246,83 @@ fn wide(value: &OsStr) -> Vec<u16> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
+    use std::env;
     use std::sync::Mutex;
 
     static TEST_LOCK: Mutex<()> = Mutex::new(());
+    thread_local! {
+        pub(super) static FAIL_PRIMARY_WRITE: Cell<bool> = const { Cell::new(false) };
+    }
+
+    #[test]
+    fn string_limits_preserve_unicode_scalar_and_trim_rules() {
+        for unit in ["a", "한", "😀", "e\u{301}", "\0"] {
+            for count in [0, 1, 127, 128, 129, 199, 200, 201, 4095, 4096, 4097] {
+                let value = unit.repeat(count);
+                let scalars = value.chars().count();
+                assert_eq!(valid_notes(&value).is_ok(), scalars <= 4096);
+                assert_eq!(
+                    valid_request_id(Some(&value)).is_ok(),
+                    (1..=128).contains(&scalars)
+                );
+                let padded = format!("  {value}\t\n");
+                assert_eq!(valid_title(&padded).is_ok(), (1..=200).contains(&scalars));
+                if let Ok(title) = valid_title(&padded) {
+                    assert_eq!(title, value);
+                }
+            }
+        }
+        assert_eq!(valid_request_id(None).unwrap(), None);
+    }
+
+    #[test]
+    fn event_lookup_reloads_same_metadata_and_validates_unrelated_rows() {
+        let store = test_store();
+        let first = create_basic_event(
+            &store,
+            "2026-10-07",
+            Some("09:30"),
+            "Zulu",
+            "old",
+            Some("lookup-1"),
+        )
+        .unwrap();
+        let second =
+            create_basic_event(&store, "2026-10-06", None, "Alpha", "", Some("lookup-2")).unwrap();
+        assert_eq!(store.event_by_id(&first.id).unwrap(), Some(first.clone()));
+        assert_eq!(store.event_by_id(&second.id).unwrap(), Some(second));
+        assert_eq!(store.event_by_id("absent").unwrap(), None);
+        let before = fs::metadata(&store.path).unwrap();
+        let mut db = store.read_database().unwrap();
+        db.events[0].notes = "new".into();
+        let bytes = serde_json::to_vec_pretty(&db).unwrap();
+        assert_eq!(bytes.len() as u64, before.len());
+        fs::write(&store.path, &bytes).unwrap();
+        File::options()
+            .write(true)
+            .open(&store.path)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(before.modified().unwrap()))
+            .unwrap();
+        assert_eq!(
+            fs::metadata(&store.path).unwrap().modified().unwrap(),
+            before.modified().unwrap()
+        );
+        assert_eq!(store.event_by_id(&first.id).unwrap().unwrap().notes, "new");
+        db.events[1].date = "invalid".into();
+        let invalid = serde_json::to_vec_pretty(&db).unwrap();
+        fs::write(&store.path, &invalid).unwrap();
+        assert!(store.event_by_id(&first.id).is_err());
+        assert_eq!(fs::read(&store.path).unwrap(), invalid);
+        fs::remove_file(&store.path).unwrap();
+        assert!(store
+            .event_by_id(&first.id)
+            .unwrap_err()
+            .contains("missing"));
+        assert!(!store.path.exists());
+        let _ = fs::remove_dir_all(store.path.parent().unwrap());
+    }
 
     fn test_store() -> Store {
         let directory = env::temp_dir().join(format!(
@@ -1257,6 +1471,281 @@ mod tests {
     }
 
     #[test]
+    fn missing_primary_after_observation_does_not_become_an_empty_store() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let store = test_store();
+        for index in 0..89 {
+            create_basic_event(
+                &store,
+                "2031-11-01",
+                None,
+                &format!("Synthetic event {index:02}"),
+                "Synthetic persistence regression",
+                Some(&format!("missing-primary-fixture-{index:02}")),
+            )
+            .unwrap();
+        }
+        assert_eq!(store.list_events(None).unwrap().len(), 89);
+        let directory = store.path.parent().unwrap().to_owned();
+        assert!(directory.starts_with(fs::canonicalize(env::temp_dir()).unwrap()));
+        let preserved = directory.join("primary-preserved-by-test.json");
+        let before = fs::read(&store.path).unwrap();
+        fs::rename(&store.path, &preserved).unwrap();
+        let result = store.list_events(None);
+        assert!(
+            result.is_err(),
+            "Missing previously observed primary unexpectedly succeeded: {result:?}"
+        );
+        assert!(
+            create_basic_event(&store, "2031-11-02", None, "Do not replace", "", None).is_err()
+        );
+        assert!(!store.path.exists());
+        assert_eq!(fs::read(preserved).unwrap(), before);
+        drop(store);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn legacy_read_only_observation_guards_missing_without_creating_marker() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let store = test_store();
+        let bytes = br#"{"version":1,"events":[{"id":"legacy-fixture","date":"2031-11-01","time":null,"title":"Legacy synthetic","notes":"","request_id":"legacy-request","completed":true,"color":null,"recurrence":null,"reminder_minutes":null}],"retired_request_ids":["previous-deletion"]}"#;
+        fs::write(&store.path, bytes).unwrap();
+        assert!(store.list_events(None).unwrap()[0].completed);
+        assert!(!store.initialized_marker_path().exists());
+        assert_eq!(fs::read(&store.path).unwrap(), bytes);
+        let directory = store.path.parent().unwrap().to_owned();
+        assert_eq!(fs::read_dir(&directory).unwrap().count(), 1);
+        let preserved = directory.join("legacy-preserved.json");
+        fs::rename(&store.path, &preserved).unwrap();
+        assert!(store.list_events(None).is_err());
+        assert!(
+            create_basic_event(&store, "2031-11-02", None, "No replacement", "", None).is_err()
+        );
+        assert_eq!(fs::read(preserved).unwrap(), bytes);
+        assert!(!store.path.exists());
+        drop(store);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn malformed_primary_observation_is_not_forgotten_after_missing() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let store = test_store();
+        let malformed = b"{ synthetic incomplete primary";
+        fs::write(&store.path, malformed).unwrap();
+        assert!(store.list_events(None).is_err());
+        assert!(!store.initialized_marker_path().exists());
+        let directory = store.path.parent().unwrap().to_owned();
+        let preserved = directory.join("malformed-preserved.json");
+        fs::rename(&store.path, &preserved).unwrap();
+        assert!(store.list_events(None).is_err());
+        assert!(create_basic_event(&store, "2031-11-02", None, "No reset", "", None).is_err());
+        assert!(!store.path.exists());
+        assert_eq!(fs::read(preserved).unwrap(), malformed);
+        drop(store);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn initialized_marker_guards_reopen_without_archives() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let store = test_store();
+        assert!(store.list_events(None).unwrap().is_empty());
+        assert!(!store.path.exists());
+        assert!(!store.initialized_marker_path().exists());
+        create_basic_event(
+            &store,
+            "2031-11-01",
+            None,
+            "Saved synthetic",
+            "",
+            Some("saved-request"),
+        )
+        .unwrap();
+        let marker = store.initialized_marker_path();
+        assert_eq!(fs::read(&marker).unwrap(), INITIALIZED_MARKER_BYTES);
+        assert!(!store.deleted_dir().exists());
+        let directory = store.path.parent().unwrap().to_owned();
+        let preserved = directory.join("saved-preserved.json");
+        let before = fs::read(&store.path).unwrap();
+        fs::rename(&store.path, &preserved).unwrap();
+        let path = store.path.clone();
+        drop(store);
+        assert!(Store::open_at(path.clone()).is_err());
+        assert!(!path.exists());
+        assert_eq!(fs::read(preserved).unwrap(), before);
+        assert_eq!(fs::read(marker).unwrap(), INITIALIZED_MARKER_BYTES);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn legacy_archives_guard_missing_primary_and_preserve_retired_ids() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let store = test_store();
+        let deleted = create_basic_event(
+            &store,
+            "2031-11-01",
+            None,
+            "Deleted synthetic",
+            "",
+            Some("retired-fixture"),
+        )
+        .unwrap();
+        store.delete_event(&deleted.id).unwrap();
+        let archive = store.deleted_dir().join(archive_name(&deleted.id));
+        let archived_bytes = fs::read(&archive).unwrap();
+        let sequence = store.deleted_dir().join("sequence.txt");
+        let sequence_bytes = fs::read(&sequence).unwrap();
+        assert_eq!(
+            store.read_database().unwrap().retired_request_ids,
+            vec!["retired-fixture"]
+        );
+        fs::remove_file(store.initialized_marker_path()).unwrap();
+        let directory = store.path.parent().unwrap().to_owned();
+        let preserved = directory.join("retired-preserved.json");
+        let before = fs::read(&store.path).unwrap();
+        fs::rename(&store.path, &preserved).unwrap();
+        let path = store.path.clone();
+        drop(store);
+        assert!(Store::open_at(path.clone()).is_err());
+        assert!(!path.exists());
+        assert_eq!(fs::read(preserved).unwrap(), before);
+        assert_eq!(fs::read(archive).unwrap(), archived_bytes);
+        assert_eq!(fs::read(sequence).unwrap(), sequence_bytes);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn interrupted_first_save_with_marker_and_candidates_is_not_auto_initialized() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let store = test_store();
+        store
+            .with_lock(|store| store.ensure_initialized_marker())
+            .unwrap();
+        let directory = store.path.parent().unwrap().to_owned();
+        let partial = directory.join(".calendar-synthetic-partial.tmp");
+        let complete = directory.join(".calendar-synthetic-complete.tmp");
+        let partial_bytes = b"{\"version\":1,\"events\":[";
+        let complete_bytes =
+            br#"{"version":1,"events":[],"retired_request_ids":["uncommitted-fixture"]}"#;
+        fs::write(&partial, partial_bytes).unwrap();
+        fs::write(&complete, complete_bytes).unwrap();
+        let marker = store.initialized_marker_path();
+        let path = store.path.clone();
+        drop(store);
+        assert!(Store::open_at(path.clone()).is_err());
+        assert!(Store::open_at(path.clone()).is_err());
+        assert!(!path.exists());
+        assert_eq!(fs::read(partial).unwrap(), partial_bytes);
+        assert_eq!(fs::read(complete).unwrap(), complete_bytes);
+        assert_eq!(fs::read(marker).unwrap(), INITIALIZED_MARKER_BYTES);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn failed_first_save_removes_only_its_new_marker_and_allows_retry() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let store = test_store();
+        FAIL_PRIMARY_WRITE.with(|fail| fail.set(true));
+        assert_eq!(
+            create_basic_event(
+                &store,
+                "2031-11-01",
+                None,
+                "Retry synthetic",
+                "",
+                Some("first-retry")
+            )
+            .unwrap_err(),
+            "synthetic primary write failure"
+        );
+        assert!(!store.path.exists());
+        assert!(!store.initialized_marker_path().exists());
+        assert!(store.list_events(None).unwrap().is_empty());
+        let saved = create_basic_event(
+            &store,
+            "2031-11-01",
+            None,
+            "Retry synthetic",
+            "",
+            Some("first-retry"),
+        )
+        .unwrap();
+        assert_eq!(store.list_events(None).unwrap(), vec![saved]);
+        let directory = store.path.parent().unwrap().to_owned();
+        drop(store);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn marker_failure_and_failed_legacy_write_preserve_primary_and_retired_ids() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let store = test_store();
+        let deleted = create_basic_event(
+            &store,
+            "2031-11-01",
+            None,
+            "Deleted synthetic",
+            "",
+            Some("retain-retired"),
+        )
+        .unwrap();
+        store.delete_event(&deleted.id).unwrap();
+        let kept = create_basic_event(
+            &store,
+            "2031-11-02",
+            None,
+            "Kept synthetic",
+            "",
+            Some("retain-active"),
+        )
+        .unwrap();
+        let before = fs::read(&store.path).unwrap();
+        let marker = store.initialized_marker_path();
+        fs::remove_file(&marker).unwrap();
+        fs::create_dir(&marker).unwrap();
+        assert!(
+            create_basic_event(&store, "2031-11-03", None, "Blocked marker", "", None)
+                .unwrap_err()
+                .starts_with("calendar initialization marker is invalid")
+        );
+        assert_eq!(fs::read(&store.path).unwrap(), before);
+        assert_eq!(store.list_events(None).unwrap(), vec![kept]);
+        assert_eq!(
+            store.read_database().unwrap().retired_request_ids,
+            vec!["retain-retired"]
+        );
+        fs::remove_dir(&marker).unwrap();
+        FAIL_PRIMARY_WRITE.with(|fail| fail.set(true));
+        assert_eq!(
+            create_basic_event(&store, "2031-11-03", None, "Failed primary", "", None).unwrap_err(),
+            "synthetic primary write failure"
+        );
+        assert_eq!(fs::read(&store.path).unwrap(), before);
+        assert_eq!(fs::read(marker).unwrap(), INITIALIZED_MARKER_BYTES);
+        let directory = store.path.parent().unwrap().to_owned();
+        drop(store);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn invalid_initialization_marker_with_missing_primary_is_preserved() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let store = test_store();
+        let marker = store.initialized_marker_path();
+        let invalid = b"unknown initialization format";
+        fs::write(&marker, invalid).unwrap();
+        let path = store.path.clone();
+        let directory = path.parent().unwrap().to_owned();
+        drop(store);
+        assert!(Store::open_at(path.clone()).is_err());
+        assert!(!path.exists());
+        assert_eq!(fs::read(marker).unwrap(), invalid);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn failed_atomic_replace_preserves_original_and_cleans_temporary_file() {
         use std::os::windows::fs::OpenOptionsExt;
         use windows_sys::Win32::Foundation::WAIT_TIMEOUT;
@@ -1289,7 +1778,11 @@ mod tests {
             WAIT_TIMEOUT
         );
         let directory = store.path.parent().unwrap().to_owned();
-        assert_eq!(fs::read_dir(&directory).unwrap().count(), 1);
+        assert_eq!(fs::read_dir(&directory).unwrap().count(), 2);
+        assert_eq!(
+            fs::read(store.initialized_marker_path()).unwrap(),
+            INITIALIZED_MARKER_BYTES
+        );
         drop(reader);
 
         let updated = store

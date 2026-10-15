@@ -57,7 +57,8 @@ Windows 10 1703 이상 / Windows 11 **x64**용 공개 미리보기입니다. [�
 
 ## 데이터와 업데이트
 
-- 일정: `%LOCALAPPDATA%\DotCalendar\calendar.json`
+- 일정: `%USERPROFILE%\.dot-calendar\calendar.json` — 현재 사용자 프로필 안의 공용 저장소를 앱과 Dot 연결이 함께 사용합니다.
+- 이전 저장소: `%LOCALAPPDATA%\DotCalendar`에 기존 일정·설정·삭제 이력이 있으면 공유 저장소 이전을 먼저 확인해야 합니다. 이전 파일은 그대로 보존하며 자동으로 빈 달력이나 다른 백업을 선택하지 않습니다.
 - 화면 설정: 같은 폴더의 `widget.json`
 - 테스트 분리: `DOT_CALENDAR_DATA_DIR`로 별도 저장 폴더 지정
 - JSON 백업: 앱 메뉴에서 내보내기·가져오기 지원, 복원 전 현재 데이터 백업. 내보낸 JSON은 활성 일정 데이터이며 별도 `deleted/` 보관함은 포함하지 않습니다.

@@ -166,10 +166,7 @@ fn call_tool(name: &str, args: &Value, store: &Store) -> Result<Value, String> {
             | "calendar_restore"
     ) {
         let id = result["id"].as_str().ok_or("write returned no event id")?;
-        let saved = store
-            .list_events(None)?
-            .into_iter()
-            .find(|event| event.id == id);
+        let saved = store.event_by_id(id)?;
         let verified = if name == "calendar_delete" {
             saved.is_none()
         } else {
@@ -204,7 +201,7 @@ fn execute_tool(name: &str, args: &Value, store: &Store) -> Result<Value, String
             let include_completed = optional_bool(args, "include_completed")?.unwrap_or(false);
             let date = Date::today();
             let events = store.list_events(None)?;
-            let show_google = Preferences::load().show_google;
+            let show_google = Preferences::load()?.show_google;
             let today_events: Vec<Value> = occurrence_indices(&events, date, date)
                 .into_iter()
                 .map(|(_, index)| &events[index])
@@ -442,7 +439,9 @@ fn optional_string<'a>(
 fn optional_notes(args: &Map<String, Value>) -> Result<&str, String> {
     match args.get("notes") {
         None => Ok(""),
-        Some(Value::String(value)) if value.chars().count() <= 4096 => Ok(value),
+        Some(Value::String(value)) if value.len() <= 4096 || value.chars().count() <= 4096 => {
+            Ok(value)
+        }
         _ => Err("notes must be a string of at most 4096 characters".to_owned()),
     }
 }
@@ -602,6 +601,23 @@ fn tool_definitions() -> Vec<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn notes_limit_counts_unicode_scalars() {
+        for unit in ["a", "한", "😀", "e\u{301}"] {
+            for count in [0, 2048, 2049, 4096, 4097] {
+                let value = unit.repeat(count);
+                let expected = value.chars().count() <= 4096;
+                let args = Map::from_iter([("notes".into(), Value::String(value.clone()))]);
+                assert_eq!(optional_notes(&args).is_ok(), expected);
+                if expected {
+                    assert_eq!(optional_notes(&args).unwrap(), value);
+                }
+            }
+        }
+        assert_eq!(optional_notes(&Map::new()).unwrap(), "");
+        assert!(optional_notes(&Map::from_iter([("notes".into(), Value::Null)])).is_err());
+    }
 
     #[test]
     fn exact_delete_selector_rejects_ambiguity_and_guards_recurring_series() {

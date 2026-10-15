@@ -33,28 +33,23 @@ impl Default for Preferences {
         }
     }
 }
-pub fn directory() -> PathBuf {
-    std::env::var_os("DOT_CALENDAR_DATA_DIR")
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(std::env::var_os("LOCALAPPDATA").unwrap_or_default()).join("DotCalendar")
-        })
+pub fn directory() -> Result<PathBuf, String> {
+    crate::data_paths::directory()
 }
 impl Preferences {
-    pub fn load() -> Self {
-        let path = directory().join("widget.json");
+    pub fn load() -> Result<Self, String> {
+        let path = directory()?.join("widget.json");
         if let Ok(bytes) = std::fs::read(path) {
             if let Ok(mut value) = serde_json::from_slice::<Self>(&bytes) {
                 value.opacity = value.opacity.clamp(102, 255);
                 value.sync_minutes = value.sync_minutes.clamp(1, 60);
-                return value;
+                return Ok(value);
             }
         }
-        Self::default()
+        Ok(Self::default())
     }
     pub fn save(&self) -> Result<(), String> {
-        let dir = directory();
+        let dir = directory()?;
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         let bytes = serde_json::to_vec_pretty(self).map_err(|e| e.to_string())?;
         let temp = dir.join("widget.json.tmp");

@@ -138,22 +138,24 @@ fn install_to(directory: &Path, executable: &Path, data: &Path) -> Result<(), St
         check_path(&directory.join(name))?;
     }
     check_path(&directory.join("connection.json"))?;
-    for (name, contents) in FILES {
-        write_file(&directory.join(name), contents.as_bytes())?;
-    }
     let connection = Connection {
         executable_path: executable.into(),
         data_directory: data.into(),
     };
     let bytes = serde_json::to_vec_pretty(&connection).map_err(|error| error.to_string())?;
+    for (name, contents) in FILES {
+        write_file(&directory.join(name), contents.as_bytes())?;
+    }
     write_file(&directory.join("connection.json"), &bytes)
 }
 
 pub fn install() -> Result<(), String> {
+    // Resolve before writing skill files or replacing an existing connection.
+    let data = crate::data_paths::directory()?;
     install_to(
         &user_directory()?,
         &std::env::current_exe().map_err(|error| error.to_string())?,
-        &crate::preferences::directory(),
+        &data,
     )
 }
 

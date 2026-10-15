@@ -74,12 +74,14 @@ impl Date {
 
     /// Number of days since 0001-01-01 in the proleptic Gregorian calendar.
     pub fn ordinal(self) -> i32 {
+        // The final entry also preserves the old loop's result for months > 12.
+        const MONTH_START: [i32; 13] = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334, 365];
         let prior = self.year - 1;
-        let mut days = prior * 365 + prior / 4 - prior / 100 + prior / 400;
-        for month in 1..self.month {
-            days += days_in_month(self.year, month) as i32;
-        }
-        days + self.day as i32 - 1
+        let days = prior * 365 + prior / 4 - prior / 100 + prior / 400;
+        days + MONTH_START[self.month.saturating_sub(1).min(12) as usize]
+            + i32::from(self.month > 2 && is_leap_year(self.year))
+            + self.day as i32
+            - 1
     }
 
     pub fn from_ordinal(ordinal: i32) -> Option<Self> {
@@ -294,6 +296,22 @@ pub fn validate_occurrence_range(from: Date, to: Date) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ordinal_exhausts_all_supported_dates_against_sequential_days() {
+        let mut expected = 0;
+        for year in 1..=9999 {
+            for month in 1..=12 {
+                for day in 1..=days_in_month(year, month) {
+                    let date = Date { year, month, day };
+                    assert_eq!(date.ordinal(), expected, "{date}");
+                    assert_eq!(Date::from_ordinal(expected), Some(date));
+                    expected += 1;
+                }
+            }
+        }
+        assert_eq!(expected, 3_652_059);
+    }
 
     #[test]
     fn leap_years_and_boundaries() {

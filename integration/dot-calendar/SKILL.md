@@ -7,6 +7,10 @@ description: Manage the Windows desktop Dot Calendar in ordinary conversation. U
 
 Use the connected Windows PC and the bundled `scripts/invoke-calendar.ps1`. The installer writes this skill's `connection.json` with the executable and calendar data directory for that PC. Do not guess paths, silently switch data directories, or edit `calendar.json` directly. This is a local integration; the connected PC and ChatGPT app must be available.
 
+The app's shared default data directory is `%USERPROFILE%\.dot-calendar`. An explicitly configured absolute `DOT_CALENDAR_DATA_DIR`, or the standalone installer's absolute `-DataDirectory`, selects a custom directory; the installed helper continues to use the exact directory in `connection.json`. Keep that pinned connection until a reviewed update succeeds.
+
+If the shared store is not prepared and the previous `%LOCALAPPDATA%\DotCalendar` location contains calendar, preferences, deleted-event or Google state, setup returns a migration-required error before changing the connection. Report the error and preserve the current files. Do not initialize a blank calendar, copy or delete old data or credentials, edit the connection, or try another directory to make the operation succeed. Migration and reconnecting to its reviewed destination are separate explicit actions.
+
 ## Execute before confirming completion
 
 For ordinary lookup, creation, update, delete and undo, use one direct local tool execution whenever the target is already clear. Do not turn a single calendar operation into planning, research, extra worker delegation, scheduled work or repeated status polling. If the host must delegate to the connected PC, pass the complete operation and context to that one local worker. Follow the host's required approval rules.

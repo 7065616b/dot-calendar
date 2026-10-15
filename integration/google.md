@@ -22,7 +22,9 @@ Dot Calendar의 Google 동기화는 선택 사항입니다. 처음 실행할 때
 - 날짜만 있는 새 일정은 Google의 하루 종일 일정으로 보냅니다. 시작 시간이 있는 **새 로컬 일정**은 서울 시간으로 1시간 길이로 만듭니다. Google에서 가져온 지원 범위의 일정은 로컬에서 제목·메모 등을 수정해도 기존 종료 시각과 길이를 보존합니다. 시작 날짜·시간을 옮기면 같은 길이만큼 종료 시각도 옮깁니다.
 - 기본 반복 규칙(매일·매주·매월·매년)과 팝업 알림 한 개를 동기화합니다. 로컬의 완료 상태는 Google 일정의 비공개 확장 속성으로 저장되며 Google Calendar 화면의 완료 표시로 나타나지는 않습니다. 색상은 Google 이벤트 색상표에서 가장 가까운 색으로 표시합니다. [Google 일정 필드 설명](https://developers.google.com/workspace/calendar/api/v3/reference/events)
 
-Google OAuth 토큰은 현재 Windows 사용자 계정의 DPAPI로 보호해 `google-tokens.dpapi`에 저장합니다. 클라이언트 ID·선택적 Desktop client secret·캘린더 ID 설정은 `google-config.json`에 저장되므로 이 파일을 비밀 저장소로 취급하지 마세요. 설치형 앱 클라이언트는 원래 클라이언트 비밀을 안전하게 숨길 수 없습니다. 동기화 기준 정보는 Google 계정·캘린더마다 별도 `google-sync-<해시>.json`에 저장됩니다. 기본 위치는 `%LOCALAPPDATA%\DotCalendar`이며 `DOT_CALENDAR_DATA_DIR` 환경 변수를 지정하면 그 폴더를 사용합니다. 여러 PC에서 사용할 경우 각 PC에서 앱을 설치하고 같은 Google 계정·캘린더에 각각 연결해야 합니다.
+Google OAuth 토큰은 현재 Windows 사용자 계정의 DPAPI로 보호해 `google-tokens.dpapi`에 저장합니다. 클라이언트 ID·선택적 Desktop client secret·캘린더 ID 설정은 `google-config.json`에 저장되므로 이 파일을 비밀 저장소로 취급하지 마세요. 설치형 앱 클라이언트는 원래 클라이언트 비밀을 안전하게 숨길 수 없습니다. 동기화 기준 정보는 Google 계정·캘린더마다 별도 `google-sync-<해시>.json`에 저장됩니다. 기본 위치는 앱·CLI·닷 연결과 같은 `%USERPROFILE%\.dot-calendar`이며, 절대 경로인 `DOT_CALENDAR_DATA_DIR`를 명시하면 그 폴더를 사용합니다. 여러 PC에서 사용할 경우 각 PC에서 앱을 설치하고 같은 Google 계정·캘린더에 각각 연결해야 합니다.
+
+공유 저장소가 준비되지 않았고 이전 `%LOCALAPPDATA%\DotCalendar`에 일정·설정·Google 기록이 남아 있으면 이전이 필요하다는 오류를 반환합니다. 이때 새 빈 설정이나 토큰을 만들거나 이전 파일을 자동으로 복사하지 않습니다. 기존 일정과 연결 정보를 확인한 뒤 별도로 이전해야 하며, 경로 오류가 있으면 Google 로그인 창이나 원격 동기화를 시작하지 않습니다.
 
 앱에서 연결을 끊으면 이 PC의 보호된 토큰을 지웁니다. 동기화 연결 정보는 같은 계정에 다시 연결할 때 중복 일정을 만들지 않도록 로컬에 남깁니다. Google 계정에 부여한 동의 자체를 취소하려면 Google 계정의 앱 액세스 설정에서도 별도로 취소해야 합니다.
 

@@ -145,13 +145,28 @@ unsafe fn line(dc: HDC, r: RECT, c: u32) {
     SetDCBrushColor(dc, c);
     FrameRect(dc, &r, GetStockObject(DC_BRUSH));
 }
+fn text_wide<'a>(s: &str, buffer: &'a mut [u16; 256]) -> std::borrow::Cow<'a, [u16]> {
+    let mut len = 0;
+    for unit in s.encode_utf16() {
+        if len == buffer.len() - 1 {
+            return std::borrow::Cow::Owned(w(s));
+        }
+        buffer[len] = unit;
+        len += 1;
+    }
+    buffer[len] = 0;
+    std::borrow::Cow::Borrowed(&buffer[..=len])
+}
+
 unsafe fn text(dc: HDC, s: &str, mut r: RECT, font: HFONT, c: u32, flags: u32) {
     let old = SelectObject(dc, font);
     SetBkMode(dc, TRANSPARENT as i32);
     SetTextColor(dc, c);
+    let mut buffer = [0u16; 256];
+    let wide = text_wide(s, &mut buffer);
     DrawTextW(
         dc,
-        w(s).as_ptr(),
+        wide.as_ptr(),
         -1,
         &mut r,
         DT_NOPREFIX | DT_SINGLELINE | DT_VCENTER | flags,
@@ -454,8 +469,11 @@ impl App {
     }
     unsafe fn init(&mut self, h: HWND) {
         self.hwnd = h;
-        self.dpi = GetDpiForWindow(h).max(96);
-        self.fonts = Fonts::new(self.dpi);
+        let dpi = GetDpiForWindow(h).max(96);
+        if dpi != self.dpi {
+            self.dpi = dpi;
+            self.fonts = Fonts::new(dpi);
+        }
         self.buttons.clear();
         for (id, title) in [
             (PREV, "‹"),
@@ -513,12 +531,19 @@ impl App {
         if !self.refresh() {
             self.arm_reminders();
         }
-        self.arm_sync();
+        // create_widget applies preferences (including the sync timer) after WM_CREATE.
     }
-    unsafe fn arm_sync(&self) {
+    unsafe fn arm_sync(&mut self) {
         KillTimer(self.hwnd, 3);
-        if google::is_connected() {
-            SetTimer(self.hwnd, 3, self.prefs.sync_minutes * 60_000, None);
+        match google::is_connected() {
+            Ok(true) => {
+                SetTimer(self.hwnd, 3, self.prefs.sync_minutes * 60_000, None);
+            }
+            Ok(false) => {}
+            Err(error) => {
+                self.status = format!("Google: {error}");
+                self.redraw();
+            }
         }
     }
     unsafe fn layout(&self) {
@@ -1511,7 +1536,7 @@ unsafe fn apply_preferences(hwnd: HWND) {
     // regressed to a black rectangle when the v0.3.3 optimization removed it.
     SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED as isize);
     SetLayeredWindowAttributes(hwnd, 0, opacity, LWA_ALPHA);
-    (*ptr).borrow().arm_sync();
+    (*ptr).borrow_mut().arm_sync();
     {
         let mut a = (*ptr).borrow_mut();
         if a.grid_key != Some((a.month, a.prefs.lunar, a.prefs.holidays)) {
@@ -1851,7 +1876,11 @@ unsafe fn start_sync(hwnd: HWND, connect: bool) {
     }
     let config = match google::load_config() {
         Ok(c) if !c.client_id.trim().is_empty() => c,
-        _ => {
+        Err(error) => {
+            show_error(&error);
+            return;
+        }
+        Ok(_) => {
             message(
                 hwnd,
                 "Google 연결",
@@ -1861,7 +1890,18 @@ unsafe fn start_sync(hwnd: HWND, connect: bool) {
             return;
         }
     };
-    if !connect && !google::is_connected() {
+    let connected = if connect {
+        true
+    } else {
+        match google::is_connected() {
+            Ok(connected) => connected,
+            Err(error) => {
+                show_error(&error);
+                return;
+            }
+        }
+    };
+    if !connected {
         message(
             hwnd,
             "Google 연결",
@@ -1940,7 +1980,11 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPAR
         // Explorer destroys child controls too. Never read a stale EDIT handle as
         // an empty draft after rebuilding: that could delete its original note.
         if let Ok(mut app) = (*ptr).try_borrow_mut() {
-            app.inline = None;
+            if app.hwnd == hwnd {
+                app.hwnd = null_mut();
+                app.buttons.clear();
+                app.inline = None;
+            }
         }
         desktop::forget_destroyed(hwnd);
         let controller = CONTROLLER_WINDOW.load(Ordering::Relaxed) as HWND;
@@ -3131,7 +3175,13 @@ unsafe fn edit_event(parent: HWND, date: Date, event: Option<Event>) {
 unsafe fn settings(parent: HWND) {
     let ptr = GetWindowLongPtrW(parent, GWLP_USERDATA) as *const RefCell<App>;
     let prefs = (*ptr).borrow().prefs.clone();
-    let g = google::load_config().unwrap_or_default();
+    let g = match google::load_config() {
+        Ok(config) => config,
+        Err(error) => {
+            show_error(&error);
+            return;
+        }
+    };
     let fields = vec![
         field(
             "불투명도 · 드래그하거나 방향키로 조절",
@@ -3313,7 +3363,7 @@ unsafe fn backup(hwnd: HWND, restore: bool) {
                     .unwrap_or_default()
                     .as_millis()
             );
-            std::fs::write(preferences::directory().join(name), store.export_json()?)
+            std::fs::write(preferences::directory()?.join(name), store.export_json()?)
                 .map_err(|e| e.to_string())?;
             store.restore_json(&data)?;
         } else {
@@ -3433,17 +3483,15 @@ unsafe extern "system" fn controller_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: 
             (*(lp as *const CREATESTRUCTW)).lpCreateParams as isize,
         );
     }
+    if msg == WM_DESTROY {
+        CONTROLLER_WINDOW.store(0, Ordering::Relaxed);
+        tray(hwnd, NIM_DELETE, None);
+        PostQuitMessage(0);
+        return 0;
+    }
     let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const RefCell<App>;
     if ptr.is_null() {
         return DefWindowProcW(hwnd, msg, wp, lp);
-    }
-    if msg == WM_DESTROY {
-        CONTROLLER_WINDOW.store(0, Ordering::Relaxed);
-        if (*ptr).try_borrow().is_ok_and(|app| app.quitting) {
-            tray(hwnd, NIM_DELETE, None);
-            PostQuitMessage(0);
-        }
-        return 0;
     }
     if msg == RELOAD {
         // The main loop may be inside a MessageBox or TaskDialog. Its event
@@ -3647,6 +3695,7 @@ pub fn run(open_dot: bool) -> Result<(), String> {
     unsafe {
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         let store = Store::open()?;
+        let prefs = Preferences::load()?;
         let signal = store.change_event_handle();
         let mutex = CreateMutexW(
             null(),
@@ -3658,17 +3707,41 @@ pub fn run(open_dot: bool) -> Result<(), String> {
         }
         // Own the mutex for the lifetime of this UI. GetLastError after a Rust
         // temporary is dropped is not a reliable instance-existence check.
-        let instance_wait = WaitForSingleObject(mutex, 0);
+        let mut instance_wait = WaitForSingleObject(mutex, 0);
         if instance_wait == WAIT_TIMEOUT {
-            let h = FindWindowW(
-                w("DotCalendarController").as_ptr(),
-                w(store.change_event_name()).as_ptr(),
-            );
-            if !h.is_null() {
-                PostMessageW(h, SHOW_WIDGET, if open_dot { DOT as usize } else { 0 }, 0);
+            // The owner can still be creating its controller, or can be exiting
+            // after losing it. Wait briefly for a handoff or ownership instead
+            // of reporting success when there is nowhere to send SHOW.
+            for _ in 0..40 {
+                let h = FindWindowW(
+                    w("DotCalendarController").as_ptr(),
+                    w(store.change_event_name()).as_ptr(),
+                );
+                if !h.is_null() {
+                    let posted =
+                        PostMessageW(h, SHOW_WIDGET, if open_dot { DOT as usize } else { 0 }, 0);
+                    CloseHandle(mutex);
+                    return if posted != 0 {
+                        Ok(())
+                    } else {
+                        Err(
+                            "기존 달력에 표시 요청을 전달하지 못했습니다. 다시 실행해 주세요."
+                                .into(),
+                        )
+                    };
+                }
+                instance_wait = WaitForSingleObject(mutex, 50);
+                if instance_wait != WAIT_TIMEOUT {
+                    break;
+                }
             }
-            CloseHandle(mutex);
-            return Ok(());
+            if instance_wait == WAIT_TIMEOUT {
+                CloseHandle(mutex);
+                return Err(
+                    "기존 달력의 시작 또는 종료가 완료되지 않았습니다. 잠시 후 다시 실행해 주세요."
+                        .into(),
+                );
+            }
         }
         if instance_wait != WAIT_OBJECT_0 && instance_wait != WAIT_ABANDONED {
             CloseHandle(mutex);
@@ -3706,7 +3779,6 @@ pub fn run(open_dot: bool) -> Result<(), String> {
                 return Err("달력 창 등록에 실패했습니다.".into());
             }
         }
-        let prefs = Preferences::load();
         let dpi = GetDpiForSystem().max(96);
         let today = Date::today();
         let state = Box::new(RefCell::new(App {
@@ -3801,6 +3873,29 @@ pub fn run(open_dot: bool) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn paint_text_encoding_matches_windows_strings_across_buffer_boundary() {
+        for text in [
+            String::new(),
+            "a\0b".into(),
+            "한글 😀".into(),
+            "a".repeat(254),
+            "a".repeat(255),
+            "a".repeat(256),
+            "😀".repeat(127),
+            "😀".repeat(128),
+            "😀".repeat(200),
+        ] {
+            let mut buffer = [0u16; 256];
+            let wide = text_wide(&text, &mut buffer);
+            assert_eq!(wide.as_ref(), w(&text));
+            assert_eq!(
+                matches!(wide, std::borrow::Cow::Borrowed(_)),
+                text.encode_utf16().count() < 256
+            );
+        }
+    }
 
     #[test]
     fn event_hit_respects_block_edges_and_gaps() {

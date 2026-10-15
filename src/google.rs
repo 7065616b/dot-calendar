@@ -118,15 +118,18 @@ pub fn save_config(config: &GoogleConfig) -> Result<(), String> {
     )
 }
 
-pub fn is_connected() -> bool {
-    match (load_config(), load_tokens()) {
-        (Ok(config), Ok(tokens)) => {
-            !config.client_id.is_empty()
-                && config.client_id == tokens.client_id
-                && !tokens.account_id.is_empty()
-        }
-        _ => false,
+pub fn is_connected() -> Result<bool, String> {
+    // A storage-resolution error must not look like a disconnected account.
+    // Keep the existing config/token validity behavior once the path is known.
+    let _data_directory = crate::data_paths::directory()?;
+    let Ok(config) = load_config() else {
+        return Ok(false);
+    };
+    if config.client_id.is_empty() {
+        return Ok(false);
     }
+    Ok(load_tokens()
+        .is_ok_and(|tokens| config.client_id == tokens.client_id && !tokens.account_id.is_empty()))
 }
 
 /// Forget local credentials. Mappings remain for a safe reconnect to the same account.
@@ -144,6 +147,7 @@ pub fn forget_connection() -> Result<String, String> {
 /// and store the access and refresh tokens using Windows DPAPI for this user.
 pub fn connect(config: &GoogleConfig) -> Result<String, String> {
     validate_config(config)?;
+    let _data_directory = crate::data_paths::directory()?;
     let listener = TcpListener::bind("127.0.0.1:0")
         .map_err(|e| format!("Cannot listen for Google sign-in: {e}"))?;
     listener.set_nonblocking(true).map_err(|e| e.to_string())?;
@@ -265,11 +269,7 @@ fn validate_config(config: &GoogleConfig) -> Result<(), String> {
 }
 
 fn data_dir() -> Result<PathBuf, String> {
-    let path = match std::env::var_os("DOT_CALENDAR_DATA_DIR") {
-        Some(value) if !value.is_empty() => PathBuf::from(value),
-        _ => PathBuf::from(std::env::var_os("LOCALAPPDATA").ok_or("LOCALAPPDATA is unavailable")?)
-            .join("DotCalendar"),
-    };
+    let path = crate::data_paths::directory()?;
     fs::create_dir_all(&path).map_err(|e| e.to_string())?;
     fs::canonicalize(path).map_err(|e| e.to_string())
 }
@@ -800,13 +800,42 @@ fn delete_remote(
     }
 }
 
+// Preserve serde_json::Value's alphabetical key order: existing sync hashes
+// must remain identical when upgrading, including nulls and JSON escaping.
+#[derive(Serialize)]
+struct FingerprintEvent<'a> {
+    color: &'a Option<String>,
+    completed: bool,
+    date: &'a str,
+    notes: &'a str,
+    recurrence: &'a Option<String>,
+    reminder_minutes: Option<u32>,
+    time: &'a Option<String>,
+    title: &'a str,
+}
+
+impl<'a> From<&'a Event> for FingerprintEvent<'a> {
+    fn from(event: &'a Event) -> Self {
+        Self {
+            color: &event.color,
+            completed: event.completed,
+            date: &event.date,
+            notes: &event.notes,
+            recurrence: &event.recurrence,
+            reminder_minutes: event.reminder_minutes,
+            time: &event.time,
+            title: &event.title,
+        }
+    }
+}
+
 fn fingerprint(event: &Event) -> String {
-    let value = json!({
-        "date": event.date, "time": event.time, "title": event.title, "notes": event.notes,
-        "completed": event.completed, "color": event.color, "recurrence": event.recurrence,
-        "reminder_minutes": event.reminder_minutes
-    });
-    hex_hash(&value.to_string())
+    // Buffer once: feeding each tiny JSON escape into SHA-256 was slower for
+    // escape-heavy notes. Borrowed fields still avoid the Value tree and clones.
+    let mut bytes = Vec::with_capacity(192 + event.title.len() + event.notes.len());
+    serde_json::to_writer(&mut bytes, &FingerprintEvent::from(event))
+        .expect("event fields serialize into a byte buffer without errors");
+    hex_digest(&Sha256::digest(&bytes))
 }
 
 fn changes_conflict(
@@ -828,8 +857,11 @@ fn can_advance_etag(
 }
 
 fn hex_hash(value: &str) -> String {
+    hex_digest(&Sha256::digest(value.as_bytes()))
+}
+
+fn hex_digest(digest: &[u8]) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
-    let digest = Sha256::digest(value.as_bytes());
     let mut result = String::with_capacity(digest.len() * 2);
     for byte in digest {
         result.push(HEX[(byte >> 4) as usize] as char);
@@ -979,7 +1011,9 @@ fn import_event(
         .unwrap_or("(Untitled)")
         .to_owned();
     let notes = remote["description"].as_str().unwrap_or("").to_owned();
-    if title.chars().count() > 200 || notes.chars().count() > 4096 {
+    if (title.len() > 200 && title.chars().count() > 200)
+        || (notes.len() > 4096 && notes.chars().count() > 4096)
+    {
         return Ok(None);
     }
     let private = &remote["extendedProperties"]["private"];
@@ -1148,6 +1182,7 @@ fn rgb(hex: &str) -> Option<[u8; 3]> {
 /// function and run it away from the UI thread.
 pub fn sync(store: &Store, config: &GoogleConfig) -> Result<String, String> {
     validate_config(config)?;
+    let _data_directory = crate::data_paths::directory()?;
     let agent = agent();
     let tokens = valid_tokens(&agent, config)?;
     let token = tokens.access_token;
@@ -1490,6 +1525,60 @@ pub fn sync(store: &Store, config: &GoogleConfig) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fingerprints_preserve_canonical_bytes_and_existing_hashes() {
+        let samples = [
+            String::new(),
+            "plain".into(),
+            "한글 😀 e\u{301}".into(),
+            "\"\\\n\r\t\0\u{1f}\u{2028}\u{2029}".into(),
+            "n".repeat(4096),
+            "😀".repeat(4096),
+        ];
+        for text in samples {
+            for options in 0..32 {
+                let mut current = event();
+                current.notes = text.clone();
+                current.title = format!("title {text}");
+                current.completed = options & 1 != 0;
+                current.color = (options & 2 != 0).then(|| "#AABBCC".into());
+                current.time = (options & 4 != 0).then(|| "23:59".into());
+                current.recurrence = (options & 8 != 0).then(|| "yearly".into());
+                current.reminder_minutes = (options & 16 != 0).then_some(10080);
+                let old = json!({
+                    "date": current.date, "time": current.time, "title": current.title, "notes": current.notes,
+                    "completed": current.completed, "color": current.color, "recurrence": current.recurrence,
+                    "reminder_minutes": current.reminder_minutes
+                }).to_string();
+                assert_eq!(
+                    serde_json::to_vec(&FingerprintEvent::from(&current)).unwrap(),
+                    old.as_bytes()
+                );
+                assert_eq!(fingerprint(&current), hex_hash(&old));
+                let previous = fingerprint(&current);
+                current.id = "changed-local-id".into();
+                current.request_id = Some("changed-request".into());
+                assert_eq!(fingerprint(&current), previous);
+            }
+        }
+    }
+
+    #[test]
+    fn imported_string_limits_preserve_unicode_scalars() {
+        for unit in ["a", "한", "😀"] {
+            for (titles, notes, allowed) in
+                [(200, 4096, true), (201, 4096, false), (200, 4097, false)]
+            {
+                let remote = json!({"id":"synthetic", "start":{"date":"2026-10-01"}, "end":{"date":"2026-10-02"},
+                    "summary":unit.repeat(titles), "description":unit.repeat(notes)});
+                assert_eq!(
+                    import_event(&remote, &HashMap::new()).unwrap().is_some(),
+                    allowed
+                );
+            }
+        }
+    }
 
     fn event() -> Event {
         Event {
