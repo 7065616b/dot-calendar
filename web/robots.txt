@@ -1,0 +1,4 @@
+# GitHub Pages project-site copy. Host-wide crawler rules belong at /robots.txt.
+User-agent: *
+Allow: /dot-calendar/
+Sitemap: https://7065616b.github.io/dot-calendar/sitemap.xml

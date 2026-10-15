@@ -1,0 +1,40 @@
+:root {
+  --bg-canvas: #09090b;
+  --bg-surface: #121215;
+  --bg-elevated: #1c1c21;
+  --bg-glass: rgba(28, 28, 33, .78);
+  --border-subtle: rgba(255, 255, 255, .07);
+  --border-focus: #3b82f6;
+  --shadow-inset-highlight: inset 0 1px 0 0 rgba(255, 255, 255, .1);
+  --shadow-elevation: 0 16px 36px -8px rgba(0, 0, 0, .6);
+  --text-primary: #f4f4f6;
+  --text-secondary: #a1a1aa;
+  --text-muted: #71717a;
+  --ease-out-expo: cubic-bezier(.22, 1, .36, 1);
+  --ease-sheet: cubic-bezier(.32, .72, 0, 1);
+  --ease-in-out: cubic-bezier(.65, 0, .35, 1);
+  --duration-fast: 150ms;
+  --duration-normal: 200ms;
+  --duration-sheet: 250ms;
+}
+:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
+.button { box-shadow: var(--shadow-inset-highlight); }
+.button-primary { background: #1267ac; }
+.download-meta, .perf-note, .demo-caption, .footer-inner p, .release-links,
+.dot-copy .muted-copy, .conversation-foot, .day-panel-heading p,
+.demo-toolbar span, .steps p, .faq-list p { color: #52666d; }
+.hero h1 { font-size: clamp(40px, 4.8vw, 66px); line-height: 1.2; }
+.hero { overflow: clip; }
+.native-figure { margin: 0; padding: 20px; border-radius: 20px; background: var(--bg-canvas); color: var(--text-secondary); box-shadow: var(--shadow-elevation); }
+.native-figure img { width: 100%; height: auto; display: block; border: 1px solid var(--border-subtle); border-radius: 12px; background: var(--bg-surface); }
+.native-figure figcaption { font-size: 12px; line-height: 1.7; margin: 16px 8px 0; }
+.native-section kbd { display: inline-block; min-width: 24px; padding: 2px 6px; border-radius: 5px; font: inherit; background: var(--bg-elevated); color: var(--text-primary); }
+.data-explainer { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px; }
+.data-explainer h3 { font-size: 19px; }
+.data-explainer p { color: #52686e; font-size: 14px; line-height: 1.9; overflow-wrap: anywhere; }
+.data-explainer code { font-size: .9em; }
+.opacity-control output, .day-select, .metric strong, .step-index { font-variant-numeric: tabular-nums; }
+@media (max-width: 760px) { .data-explainer { grid-template-columns: 1fr; gap: 12px; } .native-figure { padding: 10px; } }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
+}
