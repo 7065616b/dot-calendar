@@ -22,7 +22,12 @@ use windows_sys::Win32::{
     Storage::Xps::*,
     System::{LibraryLoader::GetModuleHandleW, SystemInformation::GetLocalTime, Threading::*},
     UI::{
-        Controls::Dialogs::*, Controls::*, HiDpi::*, Input::KeyboardAndMouse::*, Shell::*,
+        Accessibility::{HCF_HIGHCONTRASTON, HIGHCONTRASTW},
+        Controls::Dialogs::*,
+        Controls::*,
+        HiDpi::*,
+        Input::KeyboardAndMouse::*,
+        Shell::*,
         WindowsAndMessaging::*,
     },
 };
@@ -68,6 +73,7 @@ const VIEW: i32 = 46;
 const AGENDA: i32 = 47;
 const DOT: i32 = 48;
 const UNDO_DELETE: i32 = 49;
+const NEW_DETAILS: i32 = 50;
 const PALETTE: [(&str, &str); 6] = [
     ("기본", ""),
     ("파랑", "#DCEBFA"),
@@ -136,6 +142,80 @@ fn note_parts(value: &str) -> Option<(&str, &str)> {
     }
     let (title, notes) = value.split_once('\n').unwrap_or((value, ""));
     Some((title.trim(), notes))
+}
+fn event_label(event: &Event) -> std::borrow::Cow<'_, str> {
+    if !event.completed && event.time.is_none() && event.recurrence.is_none() {
+        return std::borrow::Cow::Borrowed(&event.title);
+    }
+    std::borrow::Cow::Owned(format!(
+        "{}{}{}{}{}",
+        if event.completed { "✓ " } else { "" },
+        event.time.as_deref().unwrap_or_default(),
+        if event.time.is_some() { " " } else { "" },
+        if event.recurrence.is_some() {
+            "↻ "
+        } else {
+            ""
+        },
+        event.title
+    ))
+}
+fn luminance(color: u32) -> f64 {
+    let channel = |shift: u32| {
+        let v = f64::from((color >> shift) & 255u32) / 255.0;
+        if v <= 0.04045 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    channel(0) * 0.2126 + channel(8) * 0.7152 + channel(16) * 0.0722
+}
+fn contrast(a: u32, b: u32) -> f64 {
+    let (a, b) = (luminance(a), luminance(b));
+    (a.max(b) + 0.05) / (a.min(b) + 0.05)
+}
+fn completed_ink(background: u32) -> u32 {
+    let dark = 0x00515151;
+    let light = 0x00c9c9c9;
+    let muted = if contrast(dark, background) >= contrast(light, background) {
+        dark
+    } else {
+        light
+    };
+    if contrast(muted, background) >= 4.5 {
+        muted
+    } else if contrast(0, background) >= contrast(0xffffff, background) {
+        0
+    } else {
+        0xffffff
+    }
+}
+unsafe fn high_contrast() -> bool {
+    let mut value: HIGHCONTRASTW = zeroed();
+    value.cbSize = std::mem::size_of::<HIGHCONTRASTW>() as u32;
+    SystemParametersInfoW(
+        SPI_GETHIGHCONTRAST,
+        value.cbSize,
+        &mut value as *mut _ as *mut c_void,
+        0,
+    ) != 0
+        && value.dwFlags & HCF_HIGHCONTRASTON != 0
+}
+
+fn parse_reminder(value: &str, has_time: bool) -> Result<Option<u32>, String> {
+    if value.trim().is_empty() {
+        return Ok(None);
+    }
+    let minutes = value
+        .trim()
+        .parse::<u32>()
+        .map_err(|_| "알림은 0 이상의 분으로 입력해 주세요.")?;
+    crate::store::valid_reminder(Some(minutes))?;
+    if !has_time {
+        return Err("알림을 받으려면 시간을 입력해 주세요.".into());
+    }
+    Ok(Some(minutes))
 }
 unsafe fn fill(dc: HDC, r: RECT, c: u32) {
     SetDCBrushColor(dc, c);
@@ -244,7 +324,8 @@ fn agenda_rows(cell: &Cell, events: &[Event]) -> Vec<(String, String)> {
             (
                 event.id.clone(),
                 format!(
-                    "{}  {}",
+                    "{}{}  {}",
+                    if event.completed { "✓ " } else { "" },
                     event.time.as_deref().unwrap_or("종일"),
                     event.title
                 ),
@@ -264,11 +345,18 @@ unsafe fn set_agenda_items(hwnd: HWND, rows: &[(String, String)], selected: usiz
     SendMessageW(hwnd, WM_SETREDRAW, 0, 0);
     SendMessageW(hwnd, LB_RESETCONTENT, 0, 0);
     for (_, title) in rows {
-        if SendMessageW(hwnd, LB_ADDSTRING, 0, w(title).as_ptr() as isize) < 0 {
+        let item = SendMessageW(hwnd, LB_ADDSTRING, 0, w(title).as_ptr() as isize);
+        if item < 0 {
             // A partial native list must never select a different source ID.
             SendMessageW(hwnd, LB_RESETCONTENT, 0, 0);
             break;
         }
+        SendMessageW(
+            hwnd,
+            LB_SETITEMDATA,
+            item as usize,
+            isize::from(title.starts_with("✓ ")),
+        );
     }
     SendMessageW(hwnd, LB_SETCURSEL, selected, 0);
     SendMessageW(hwnd, WM_SETREDRAW, 1, 0);
@@ -514,7 +602,8 @@ impl App {
             [0u16].as_ptr(),
             [0u16].as_ptr(),
         );
-        for (id, title) in [(VIEW, "전체 메모"), (AGENDA, "하루 일정"), (DOT, "Dot")] {
+        for (id, title) in [(VIEW, "전체 메모"), (AGENDA, "하루 일정"), (DOT, "AI 연결")]
+        {
             self.buttons.push((
                 id,
                 control(
@@ -753,7 +842,11 @@ impl App {
         let mut st: SYSTEMTIME = zeroed();
         GetLocalTime(&mut st);
         let s = st.wHour as u32 * 3600 + st.wMinute as u32 * 60 + st.wSecond as u32;
-        SetTimer(self.hwnd, 1, (86400 - s) * 1000 + 250, None);
+        let midnight = (86400 - s) * 1000 + 250;
+        #[cfg(feature = "contest-startup")]
+        let midnight =
+            crate::contest_startup::next_day_millis().map_or(midnight, |kst| midnight.min(kst));
+        SetTimer(self.hwnd, 1, midnight, None);
         let today = Date {
             year: st.wYear as i32,
             month: st.wMonth as u32,
@@ -774,6 +867,7 @@ impl App {
     unsafe fn paint(&self, dc: HDC) {
         let r = self.client();
         let (bg, ink, muted, border) = self.colors();
+        let high_contrast = high_contrast();
         fill(dc, r, bg);
         let header = rect(0, 0, r.right, self.px(60));
         if RectVisible(dc, &header) != 0 {
@@ -947,12 +1041,20 @@ impl App {
                 let er = event_row_rect(cr, n, self.dpi);
                 let explicit = e.color.as_deref().and_then(color);
                 let selected_event = selected && self.selected_id.as_deref() == Some(e.id.as_str());
-                let block = explicit.unwrap_or(match (self.prefs.dark, selected_event) {
-                    (true, true) => 0x00715940,
-                    (true, false) => 0x00554b3d,
-                    (false, true) => 0x00e9d2bb,
-                    (false, false) => 0x00f1e5d9,
-                });
+                let block = if high_contrast {
+                    GetSysColor(if selected_event {
+                        COLOR_HIGHLIGHT
+                    } else {
+                        COLOR_WINDOW
+                    })
+                } else {
+                    explicit.unwrap_or(match (self.prefs.dark, selected_event) {
+                        (true, true) => 0x00715940,
+                        (true, false) => 0x00554b3d,
+                        (false, true) => 0x00e9d2bb,
+                        (false, false) => 0x00f1e5d9,
+                    })
+                };
                 round(dc, er, block, self.px(5));
                 if selected_event {
                     fill(
@@ -966,22 +1068,10 @@ impl App {
                         0x00d47a39,
                     );
                 }
-                let t;
-                let display = if e.time.is_none() && e.recurrence.is_none() {
-                    e.title.as_str()
-                } else {
-                    t = format!(
-                        "{}{}{}{}",
-                        e.time.as_deref().unwrap_or_default(),
-                        if e.time.is_some() { " " } else { "" },
-                        if e.recurrence.is_some() { "↻ " } else { "" },
-                        e.title
-                    );
-                    &t
-                };
+                let display = event_label(e);
                 text(
                     dc,
-                    display,
+                    &display,
                     rect(
                         er.left + self.px(8),
                         er.top,
@@ -989,7 +1079,19 @@ impl App {
                         er.bottom - er.top,
                     ),
                     self.fonts.body,
-                    if explicit.is_some() { 0x00443527 } else { ink },
+                    if high_contrast {
+                        GetSysColor(if selected_event {
+                            COLOR_HIGHLIGHTTEXT
+                        } else {
+                            COLOR_WINDOWTEXT
+                        })
+                    } else if e.completed {
+                        completed_ink(block)
+                    } else if explicit.is_some() {
+                        0x00443527
+                    } else {
+                        ink
+                    },
                     DT_LEFT | DT_END_ELLIPSIS,
                 );
             }
@@ -1144,6 +1246,12 @@ unsafe fn popup(hwnd: HWND, cell: Option<usize>) {
             AppendMenuW(
                 menu,
                 MF_STRING,
+                NEW_DETAILS as usize,
+                w("새 일정 (시간·반복)…").as_ptr(),
+            );
+            AppendMenuW(
+                menu,
+                MF_STRING,
                 AGENDA as usize,
                 w("이 날짜의 전체 일정").as_ptr(),
             );
@@ -1164,40 +1272,40 @@ unsafe fn popup(hwnd: HWND, cell: Option<usize>) {
                 AppendMenuW(colors, MF_STRING, 2000 + n, w(name).as_ptr());
             }
             AppendMenuW(menu, MF_POPUP, colors as usize, w("날짜 배경색").as_ptr());
-            AppendMenuW(menu, MF_SEPARATOR, 0, null());
-        }
-        for (id, t) in [
-            (DOT, "Dot · 간편 연결"),
-            (UNDO_DELETE, "마지막 삭제 되돌리기"),
-            (SETTINGS, "설정"),
-            (CONNECT, "Google 계정 연결"),
-            (DISCONNECT, "이 PC의 Google 연결 해제"),
-            (SYNC, "지금 동기화"),
-            (BACKUP, "백업 내보내기"),
-            (RESTORE, "백업 가져오기"),
-            (PRINT, "이 달 인쇄"),
-            (
-                LOCK,
-                if a.prefs.locked {
-                    "위치 잠금 해제"
-                } else {
-                    "위치 잠금"
-                },
-            ),
-            (
-                DETACH,
-                if desktop::is_attached(hwnd) {
-                    "일반 창으로 보기"
-                } else {
-                    "바탕화면에 고정"
-                },
-            ),
-            (SHOW, "달력 표시"),
-            (HIDE, "달력 숨기기"),
-            (ABOUT, "도움말 / 공휴일 안내"),
-            (QUIT, "종료"),
-        ] {
-            AppendMenuW(menu, MF_STRING, id as usize, w(t).as_ptr());
+        } else {
+            for (id, t) in [
+                (DOT, "AI 연결 (Claude · Gemini · ChatGPT)"),
+                (UNDO_DELETE, "마지막 삭제 되돌리기"),
+                (SETTINGS, "설정"),
+                (CONNECT, "Google 계정 연결"),
+                (DISCONNECT, "이 PC의 Google 연결 해제"),
+                (SYNC, "지금 동기화"),
+                (BACKUP, "백업 내보내기"),
+                (RESTORE, "백업 가져오기"),
+                (PRINT, "이 달 인쇄"),
+                (
+                    LOCK,
+                    if a.prefs.locked {
+                        "위치 잠금 해제"
+                    } else {
+                        "위치 잠금"
+                    },
+                ),
+                (
+                    DETACH,
+                    if desktop::is_attached(hwnd) {
+                        "일반 창으로 보기"
+                    } else {
+                        "바탕화면에 고정"
+                    },
+                ),
+                (SHOW, "달력 표시"),
+                (HIDE, "달력 숨기기"),
+                (ABOUT, "도움말 / 공휴일 안내"),
+                (QUIT, "종료"),
+            ] {
+                AppendMenuW(menu, MF_STRING, id as usize, w(t).as_ptr());
+            }
         }
     }
     let mut p = zeroed();
@@ -1642,6 +1750,12 @@ unsafe fn view_day(hwnd: HWND) {
 
 unsafe fn command(hwnd: HWND, id: i32) {
     let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const RefCell<App>;
+    #[cfg(feature = "contest-startup")]
+    if id != QUIT {
+        if let Err(error) = crate::contest_startup::start() {
+            (*ptr).borrow_mut().status = error;
+        }
+    }
     if id != ADD
         && id != EDIT
         && id != DETAILS
@@ -1655,7 +1769,7 @@ unsafe fn command(hwnd: HWND, id: i32) {
     match id {
         DOT => {
             if let Err(error) = dot_connection::show(hwnd) {
-                message(hwnd, "닷 연결 준비", &error, MB_OK | MB_ICONWARNING);
+                message(hwnd, "AI 연결", &error, MB_OK | MB_ICONWARNING);
             }
         }
         VIEW => view_selected(hwnd),
@@ -1685,6 +1799,11 @@ unsafe fn command(hwnd: HWND, id: i32) {
             a.rebuild_cells();
         }
         ADD | EDIT => begin_inline(hwnd, id == EDIT),
+        NEW_DETAILS => {
+            let date = (*ptr).borrow().selected;
+            edit_event(hwnd, date, None);
+            (*ptr).borrow_mut().refresh();
+        }
         SHOW_GOOGLE => {
             let mut a = (*ptr).borrow_mut();
             let old = a.prefs.show_google;
@@ -2335,11 +2454,19 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPAR
             }
             a.arm_reminders();
             if wp == 1 {
+                #[cfg(feature = "contest-startup")]
+                if let Err(error) = crate::contest_startup::start() {
+                    a.status = error;
+                }
                 a.redraw();
             }
             0
         }
         WM_TIMECHANGE | WM_POWERBROADCAST => {
+            #[cfg(feature = "contest-startup")]
+            if let Err(error) = crate::contest_startup::start() {
+                a.status = error;
+            }
             a.arm_reminders();
             a.redraw();
             1
@@ -2400,14 +2527,22 @@ impl Form {
         v * self.dpi as i32 / 96
     }
     unsafe fn init(&mut self, h: HWND) {
-        self.dpi = GetDpiForWindow(h).max(96);
-        self.fonts = Fonts::new(self.dpi);
+        let dpi = GetDpiForWindow(h).max(96);
+        if self.dpi != dpi {
+            self.dpi = dpi;
+            self.fonts = Fonts::new(dpi);
+        }
         for (i, f) in self.fields.iter_mut().enumerate() {
             let (class, style) = match &f.kind {
                 Kind::Choice(_) => ("COMBOBOX", CBS_DROPDOWNLIST as u32 | WS_VSCROLL),
                 Kind::Agenda { .. } => (
                     "LISTBOX",
-                    WS_BORDER | WS_VSCROLL | LBS_NOTIFY as u32 | LBS_NOINTEGRALHEIGHT as u32,
+                    WS_BORDER
+                        | WS_VSCROLL
+                        | LBS_NOTIFY as u32
+                        | LBS_NOINTEGRALHEIGHT as u32
+                        | LBS_OWNERDRAWFIXED as u32
+                        | LBS_HASSTRINGS as u32,
                 ),
                 Kind::Check => ("BUTTON", BS_AUTOCHECKBOX as u32),
                 Kind::Slider => ("msctls_trackbar32", TBS_NOTICKS | TBS_FIXEDLENGTH),
@@ -2460,6 +2595,7 @@ impl Form {
                     SendMessageW(f.hwnd, CB_SETCURSEL, f.value.parse().unwrap_or(0), 0);
                 }
                 Kind::Agenda { rows, .. } => {
+                    SendMessageW(f.hwnd, LB_SETITEMHEIGHT, 0, (23 * self.dpi / 96) as isize);
                     set_agenda_items(f.hwnd, &rows.borrow(), f.value.parse().unwrap_or(0));
                 }
                 Kind::Check => {
@@ -2638,6 +2774,73 @@ unsafe extern "system" fn form_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
     let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const RefCell<Form>;
     if ptr.is_null() {
         return DefWindowProcW(hwnd, msg, wp, lp);
+    }
+    if msg == WM_MEASUREITEM && lp != 0 {
+        let item = &mut *(lp as *mut MEASUREITEMSTRUCT);
+        if item.CtlType == ODT_LISTBOX {
+            item.itemHeight = 23 * GetDpiForWindow(hwnd).max(96) / 96;
+            return 1;
+        }
+    }
+    if msg == WM_DRAWITEM && lp != 0 {
+        let item = &*(lp as *const DRAWITEMSTRUCT);
+        if item.CtlType == ODT_LISTBOX {
+            // LBS_HASSTRINGS keeps the native accessible name and keyboard mapping.
+            // Read control-owned strings: painting may re-enter while Form is borrowed.
+            let selected = item.itemState & ODS_SELECTED != 0;
+            let background = GetSysColor(if selected {
+                COLOR_HIGHLIGHT
+            } else {
+                COLOR_WINDOW
+            });
+            fill(item.hDC, item.rcItem, background);
+            if item.itemID != u32::MAX {
+                let len = SendMessageW(item.hwndItem, LB_GETTEXTLEN, item.itemID as usize, 0);
+                if (0..=8192).contains(&len) {
+                    let mut value = vec![0u16; len as usize + 1];
+                    if SendMessageW(
+                        item.hwndItem,
+                        LB_GETTEXT,
+                        item.itemID as usize,
+                        value.as_mut_ptr() as isize,
+                    ) >= 0
+                    {
+                        let completed =
+                            SendMessageW(item.hwndItem, LB_GETITEMDATA, item.itemID as usize, 0)
+                                == 1;
+                        let ink = if completed && !selected && !high_contrast() {
+                            completed_ink(background)
+                        } else {
+                            GetSysColor(if selected {
+                                COLOR_HIGHLIGHTTEXT
+                            } else {
+                                COLOR_WINDOWTEXT
+                            })
+                        };
+                        let old = SelectObject(
+                            item.hDC,
+                            SendMessageW(item.hwndItem, WM_GETFONT, 0, 0) as HGDIOBJ,
+                        );
+                        SetTextColor(item.hDC, ink);
+                        SetBkMode(item.hDC, TRANSPARENT as i32);
+                        let mut area = item.rcItem;
+                        area.left += 4 * GetDpiForWindow(hwnd).max(96) as i32 / 96;
+                        DrawTextW(
+                            item.hDC,
+                            value.as_ptr(),
+                            len as i32,
+                            &mut area,
+                            DT_NOPREFIX | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
+                        );
+                        SelectObject(item.hDC, old);
+                    }
+                }
+            }
+            if item.itemState & ODS_FOCUS != 0 {
+                DrawFocusRect(item.hDC, &item.rcItem);
+            }
+            return 1;
+        }
     }
     if msg == WM_DESTROY {
         if let Ok(mut form) = (*ptr).try_borrow_mut() {
@@ -3081,7 +3284,7 @@ unsafe fn edit_event(parent: HWND, date: Date, event: Option<Event>) {
             rect(326, 314, 150, 32),
         ),
         field(
-            "알림 · 몇 분 전 (빈칸: 끔, 시간 필수)",
+            "알림 · 0~525600분 전 (빈칸: 끔, 시간 필수)",
             event
                 .as_ref()
                 .and_then(|e| e.reminder_minutes)
@@ -3112,27 +3315,23 @@ unsafe fn edit_event(parent: HWND, date: Date, event: Option<Event>) {
         490,
         None,
         Box::new(move |v| {
-            let store = Store::open()?;
+            if IsWindow(parent) == 0 {
+                return Err("달력 창이 닫혔습니다. 내용을 복사해 보관해 주세요.".into());
+            }
+            let ptr = GetWindowLongPtrW(parent, GWLP_USERDATA) as *const RefCell<App>;
+            if ptr.is_null() {
+                return Err("달력 저장소를 찾을 수 없습니다.".into());
+            }
+            let app = (*ptr)
+                .try_borrow()
+                .map_err(|_| "달력이 다른 작업 중입니다. 다시 저장해 주세요.")?;
+            let store = &app.store;
             let time = if v[2].trim().is_empty() {
                 None
             } else {
                 Some(v[2].trim())
             };
-            let reminder = if v[6].trim().is_empty() {
-                None
-            } else {
-                Some(
-                    v[6].trim()
-                        .parse::<u32>()
-                        .map_err(|_| "알림은 0 이상의 분으로 입력해 주세요.")?,
-                )
-            };
-            if reminder.is_some() && time.is_none() {
-                return Err("알림을 받으려면 시간을 입력해 주세요.".into());
-            }
-            if reminder.is_some_and(|m| m > 10080) {
-                return Err("알림은 최대 7일(10080분) 전까지 설정할 수 있습니다.".into());
-            }
+            let reminder = parse_reminder(&v[6], time.is_some())?;
             let recurrence = repeat[v[4].parse::<usize>().unwrap_or(0).min(4)];
             let c = PALETTE[v[5].parse::<usize>().unwrap_or(0).min(5)].1;
             let c = if c.is_empty() { None } else { Some(c) };
@@ -3347,10 +3546,14 @@ unsafe fn backup(hwnd: HWND, restore: bool) {
         return;
     };
     let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const RefCell<App>;
+    // Modal confirmation pumps messages; do not keep an App borrow across it.
+    if restore && message(hwnd,"백업 가져오기","현재 일정을 백업 내용으로 교체합니다. 현재 데이터는 복원 전 백업으로 보관합니다. 계속할까요?",MB_YESNO|MB_ICONWARNING|MB_DEFBUTTON2)!=IDYES { return; }
     let result = (|| -> Result<(), String> {
-        let store = Store::open()?;
+        let app = (*ptr)
+            .try_borrow()
+            .map_err(|_| "달력이 다른 작업 중입니다. 다시 시도해 주세요.")?;
+        let store = &app.store;
         if restore {
-            if message(hwnd,"백업 가져오기","현재 일정을 백업 내용으로 교체합니다. 현재 데이터는 복원 전 백업으로 보관합니다. 계속할까요?",MB_YESNO|MB_ICONWARNING|MB_DEFBUTTON2)!=IDYES{return Ok(());}
             let metadata = std::fs::metadata(&path).map_err(|e| e.to_string())?;
             if metadata.len() > 4 * 1024 * 1024 {
                 return Err("백업 파일은 4 MiB 이하여야 합니다.".into());
@@ -3841,6 +4044,13 @@ pub fn run(open_dot: bool) -> Result<(), String> {
         if open_dot {
             PostMessageW(state.borrow().hwnd, WM_COMMAND, DOT as usize, 0);
         }
+        #[cfg(feature = "contest-startup")]
+        {
+            if let Err(error) = crate::contest_startup::start() {
+                (*state).borrow_mut().status = error;
+            }
+            (*state).borrow_mut().arm_reminders();
+        }
         let mut msg: MSG = zeroed();
         'events: loop {
             let ret =
@@ -3873,6 +4083,57 @@ pub fn run(open_dot: bool) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn completed_labels_preserve_source_and_row_order() {
+        let mut event: Event = serde_json::from_value(serde_json::json!({
+            "id":"done", "date":"2026-10-15", "title":"한글 🙂", "notes":"private"
+        }))
+        .unwrap();
+        assert!(matches!(event_label(&event), std::borrow::Cow::Borrowed(_)));
+        event.completed = true;
+        event.time = Some("18:00".into());
+        event.recurrence = Some("weekly".into());
+        let original = event.clone();
+        assert_eq!(event_label(&event), "✓ 18:00 ↻ 한글 🙂");
+        let mut cells = vec![Cell {
+            date: Date::parse(&event.date).unwrap(),
+            date_key: event.date.clone(),
+            holiday: String::new(),
+            lunar: String::new(),
+            events: vec![0],
+        }];
+        let rows = agenda_rows(&cells.remove(0), std::slice::from_ref(&event));
+        assert_eq!(rows, vec![("done".into(), "✓ 18:00  한글 🙂".into())]);
+        assert_eq!(event, original);
+    }
+
+    #[test]
+    fn completed_text_has_readable_contrast_on_palette_and_dark_selection() {
+        let backgrounds = [
+            0x00715940, 0x00554b3d, 0x00e9d2bb, 0x00f1e5d9, 0x00ffffff, 0, 0x00757575, 0x00909090,
+        ];
+        for background in backgrounds
+            .into_iter()
+            .chain(PALETTE.iter().filter_map(|(_, value)| color(value)))
+        {
+            assert!(contrast(completed_ink(background), background) >= 4.5);
+        }
+    }
+
+    #[test]
+    fn local_reminder_input_matches_store_boundary_without_clamping() {
+        for minutes in [0, 10080, 40320, 40321, 525600] {
+            assert_eq!(
+                parse_reminder(&minutes.to_string(), true).unwrap(),
+                Some(minutes)
+            );
+        }
+        for value in ["-1", "525601", "4294967296", "minutes", "1.5"] {
+            assert!(parse_reminder(value, true).is_err());
+        }
+        assert_eq!(parse_reminder(" ", false).unwrap(), None);
+        assert!(parse_reminder("0", false).is_err());
+    }
 
     #[test]
     fn paint_text_encoding_matches_windows_strings_across_buffer_boundary() {

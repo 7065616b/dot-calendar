@@ -2,6 +2,8 @@
 
 mod calendar_info;
 mod cli;
+#[cfg(feature = "contest-startup")]
+mod contest_startup;
 mod data_paths;
 mod desktop;
 mod dot_connection;

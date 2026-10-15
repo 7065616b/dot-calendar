@@ -2,14 +2,14 @@
 
 **Rust로 만든 가벼운 Windows 바탕화면 달력. 메모는 바로 쓰고, 일정 관리는 Your dot과 함께.**
 
-[웹사이트](https://7065616b.github.io/dot-calendar/) · [Windows 다운로드](https://github.com/7065616b/dot-calendar/releases/tag/v0.3.15) · [문제 제보](https://github.com/7065616b/dot-calendar/issues) · [MIT License](LICENSE)
+[웹사이트](https://7065616b.github.io/dot-calendar/) · [Windows 다운로드](https://github.com/7065616b/dot-calendar/releases/tag/v0.3.17) · [문제 제보](https://github.com/7065616b/dot-calendar/issues) · [MIT License](LICENSE)
 
-Windows 10 1703 이상 / Windows 11 **x64**용 공개 미리보기입니다. [설치 파일](https://github.com/7065616b/dot-calendar/releases/download/v0.3.15/dot-calendar-0.3.15-windows-x64-setup.exe)을 실행하면 현재 사용자 계정에 달력과 닷의 로컬 연결이 함께 설치됩니다. 설치 없는 [휴대용 ZIP](https://github.com/7065616b/dot-calendar/releases/download/v0.3.15/dot-calendar-0.3.15-windows-x64-preview.zip)도 제공합니다.
+Windows 10 1703 이상 / Windows 11 **x64**용 공개 미리보기입니다. [설치 파일](https://github.com/7065616b/dot-calendar/releases/download/v0.3.17/dot-calendar-0.3.17-windows-x64-setup.exe)을 실행하면 현재 사용자 계정에 달력과 닷의 로컬 연결이 함께 설치됩니다. 설치 없는 [휴대용 ZIP](https://github.com/7065616b/dot-calendar/releases/download/v0.3.17/dot-calendar-0.3.17-windows-x64-preview.zip)도 제공합니다.
 
 ## 작게 만들고, 필요할 때만 일합니다
 
 - **Rust + Win32 네이티브**: WebView·Electron·Node 런타임 없이 동작합니다.
-- **약 1.15MiB 실행 파일**: v0.3.15 Windows x64 실행 파일은 1,209,856 bytes이며 여러 크기의 아이콘을 포함합니다.
+- **약 1.23MiB 실행 파일**: v0.3.17 Windows x64 실행 파일은 1,291,776 bytes이며 여러 크기의 아이콘을 포함합니다.
 - **이벤트 기반 대기**: 입력, 저장소 변경 신호, 날짜·알림·선택적 동기화 시각을 기다립니다. 달력 갱신용 유휴 폴링이나 애니메이션 루프를 두지 않습니다.
 - **필요한 데이터만 준비**: 반복 일정은 원본을 참조하고, 하루 목록과 전체 메모 창은 요청 시 생성해 닫을 때 해제합니다.
 
@@ -24,6 +24,9 @@ Windows 10 1703 이상 / Windows 11 **x64**용 공개 미리보기입니다. [�
 | 전체 메모 | 일정 선택 후 **전체 메모** 또는 Space로 긴 본문까지 읽고 복사합니다. |
 | 하루 전체 일정 | **`+N`**, 상단 **하루 일정**, 날짜 우클릭, Ctrl+Enter로 스크롤 목록을 엽니다. 100개 메뉴 제한이 없습니다. |
 | Your dot | “내일 3시 회의 추가”, “10월 15일 회의 삭제”, “방금 삭제한 일정 되돌려줘”처럼 짧게 요청해 일정 조회·생성·수정·삭제·복구를 돕습니다. 날짜가 정해진 작업은 추가할지 물어볼 수 있습니다. |
+| AI 연결 | 안내, 오늘·다가오는 일정 요약, 로컬 MCP JSON을 각각 선택해 복사합니다. 외부 클라이언트 설정은 사용자가 적용합니다. |
+| 완료 표시·상세 일정 | 완료 항목에 ✓와 구분 색상을 표시합니다. 날짜 우클릭의 **새 일정 (시간·반복)…**에서 시각·반복·알림을 함께 설정합니다. |
+| 선택적 공모전 수집 | 명시적인 로컬 설정이 있으면 KST 기준 매일 첫 실행에 공개 원문을 확인합니다. 불확실한 일정과 기존 항목의 중복 가능성은 검토 대기로 남깁니다. |
 | Google Calendar | 선택적 OAuth 연결·동기화, 가져온 일정 표시/숨김을 제공합니다. |
 | 일상 관리 | 반복 일정, 음력·한국 공휴일, 알림, 투명도·테마, 날짜 배경색, 백업·복원·인쇄를 지원합니다. |
 
@@ -41,13 +44,17 @@ Windows 10 1703 이상 / Windows 11 **x64**용 공개 미리보기입니다. [�
 
 ## Your dot 연결
 
-1. [Windows 설치 파일](https://github.com/7065616b/dot-calendar/releases/download/v0.3.15/dot-calendar-0.3.15-windows-x64-setup.exe)을 실행합니다. 닷의 로컬 연결도 함께 등록됩니다.
-2. 앱의 **Dot** 버튼에서 안내 문구를 복사해 Your dot에게 한 번 보냅니다. 연결된 PC와 대화 앱이 온라인이어야 합니다.
+1. [Windows 설치 파일](https://github.com/7065616b/dot-calendar/releases/download/v0.3.17/dot-calendar-0.3.17-windows-x64-setup.exe)을 실행합니다. 닷의 로컬 연결도 함께 등록됩니다.
+2. 앱의 **AI 연결** 버튼에서 안내 문구를 복사해 Your dot에게 한 번 보냅니다. 연결된 PC와 대화 앱이 온라인이어야 합니다.
 3. 이제 **“오늘 일정 알려줘”**, **“내일 3시 회의 추가해줘”**, **“이거 캘린더에 반영해줘”**처럼 말합니다. 작업 중 구체적인 마감일이 생기면 닷이 **“10월 15일 마감으로 캘린더에 추가할까요?”**라고 제안하고, 수락하면 반영하도록 안내합니다.
 
-안내 문구는 기본 달력 선호를 닷에게 알려주는 한 번의 대화입니다. 설치 프로그램은 이 PC의 로컬 연결을 등록하지만, Your dot 계정의 기억·기본 달력 설정을 자동으로 변경하지는 않습니다. 닷이 연결된 도구로 실제 수행한 작업만 완료 처리하며 반복 시리즈와 Google 일정은 자동 완료하지 않습니다. 설치 없는 ZIP을 쓰는 경우 앱의 **Dot** 버튼에서 이 PC 연결을 등록할 수 있습니다.
+안내 문구는 기본 달력 선호를 닷에게 알려주는 한 번의 대화입니다. 설치 프로그램은 이 PC의 로컬 연결을 등록하지만, Your dot 계정의 기억·기본 달력 설정을 자동으로 변경하지는 않습니다. 닷이 연결된 도구로 실제 수행한 작업만 완료 처리하며 반복 시리즈와 Google 일정은 자동 완료하지 않습니다. 설치 없는 ZIP을 쓰는 경우 앱의 **AI 연결 → 기존 Dot 연결 준비**로 로컬 스킬을 준비할 수 있습니다.
 
 로컬 스킬·MCP 검사를 통과했고, 이 PC의 Your dot 대화에서 **오늘 일정 읽기**를 확인했습니다. 새 삭제·복구 동작을 비롯한 계정 대화 경유 쓰기는 사용 환경에서 별도 확인이 필요합니다. 일반 ChatGPT 채팅만으로 이 PC 파일에 자동 접근하는 기능은 아닙니다. 자세한 설정은 [닷·MCP 연결 안내](integration/README.md)에 있습니다.
+
+AI 연결 창을 여는 것만으로 클립보드나 외부 설정이 변경되지는 않습니다. 일정 요약에는 오늘의 완료·미완료 항목과 앞으로 6일의 미완료 항목을 넣으며 메모 본문은 제외합니다. 지원 범위와 수동 JSON 적용 방법은 [AI 연결 안내](integration/ai-connection.md)를 확인하세요.
+
+공모전 수집은 별도의 PowerShell 7이 필요한 선택 기능입니다. 기본 설치는 수집을 켜지 않으며, [수집 설정과 범위](integration/contest-collector.md)에 따라 준비한 경우에만 유한한 작업을 실행합니다. 출처 접근 실패와 신규 일정 0건을 구분하고 사용자 완료 상태·수정·삭제 이력·제외 목록을 보존합니다.
 
 ## Google Calendar
 

@@ -1,11 +1,16 @@
 [package]
 name = "dot-calendar"
-version = "0.3.16"
+version = "0.3.17"
 edition = "2021"
 description = "A quiet, native Windows calendar for Your dot"
 license = "MIT"
 repository = "https://github.com/7065616b/dot-calendar"
 homepage = "https://7065616b.github.io/dot-calendar/"
+
+[features]
+# The worker remains dormant without an explicitly enabled local configuration.
+default = ["contest-startup"]
+contest-startup = []
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -20,9 +25,9 @@ windows-sys = { version = "0.61", features = [
   "Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Graphics_Dwm",
   "Win32_Storage_FileSystem", "Win32_Security", "Win32_System_Threading",
   "Win32_System_SystemInformation", "Win32_System_LibraryLoader",
-  "Win32_System_Console", "Win32_UI_WindowsAndMessaging", "Win32_UI_Controls",
+  "Win32_System_Console", "Win32_System_Time", "Win32_UI_WindowsAndMessaging", "Win32_UI_Controls",
   "Win32_System_DataExchange", "Win32_System_Memory",
-  "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Accessibility",
   "Win32_Security_Cryptography", "Win32_UI_Shell",
   "Win32_UI_Controls_Dialogs", "Win32_System_Registry", "Win32_Storage_Xps"
 ] }

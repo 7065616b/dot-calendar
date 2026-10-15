@@ -26,7 +26,8 @@ jobs:
           "RC=$($rc.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
       - run: cargo fmt --all -- --check
       - run: cargo test --locked
-      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked --no-default-features
+      - run: cargo clippy --locked --all-targets --all-features -- -D warnings
       - run: cargo build --release --locked
       - name: Isolated CLI and MCP smoke
         shell: pwsh
@@ -37,3 +38,10 @@ jobs:
       - name: Dot helper deletion and recovery regressions
         shell: pwsh
         run: ./integration/dot-calendar/scripts/test-invoke-calendar.ps1 -ExePath "$pwd\target\release\dot-calendar.exe"
+      - name: Offline contest collection regressions
+        shell: pwsh
+        run: |
+          ./scripts/test-contest-extraction.ps1
+          ./scripts/test-contest-collector.ps1
+          ./scripts/test-contest-sources.ps1
+          ./scripts/test-contest-schedule.ps1

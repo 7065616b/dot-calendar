@@ -42,8 +42,8 @@ en.CloseForUpdate=Dot Calendar could not close for this update. Close it and ret
 ko.CloseForUpdate=업데이트를 위해 Dot Calendar를 종료할 수 없습니다. 앱을 닫고 다시 시도해 주세요.
 en.CloseForUninstall=Dot Calendar could not close. Finish editing in the calendar and retry uninstalling.
 ko.CloseForUninstall=Dot Calendar를 종료하지 못했습니다. 달력에서 편집을 마친 뒤 제거를 다시 시도해 주세요.
-en.ConnectFailed=Dot Calendar was installed, but Your dot could not be connected automatically. Open the app and choose Dot to retry.
-ko.ConnectFailed=Dot Calendar 설치는 완료됐지만 닷 연결은 자동으로 끝내지 못했습니다. 앱의 Dot 버튼에서 다시 시도해 주세요.
+en.ConnectFailed=Dot Calendar was installed, but the local skill could not be prepared. Open AI connection and choose the local-skill preparation action to retry.
+ko.ConnectFailed=Dot Calendar 설치는 완료됐지만 로컬 스킬 준비는 끝내지 못했습니다. 앱의 AI 연결에서 기존 Dot 연결 준비를 선택해 다시 시도해 주세요.
 
 [Files]
 ; The portable archive is assembled from an explicit allowlist. The installer

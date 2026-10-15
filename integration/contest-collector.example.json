@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "runId": "example-2026-10-13",
+  "collectedAt": "2026-10-13T13:00:00Z",
+  "collectorState": {
+    "defaultDirectory": "%USERPROFILE%\\.dot-calendar-collector\\<normalized-data-directory-sha256-first16>",
+    "explicitOverride": "-StateDirectory",
+    "legacyMigration": "A reviewed migration.json is required when legacy state.json or exclusions.json exists; this metadata does not select an execution path."
+  },
+  "sourceResults": [
+    {
+      "source": "linkareer",
+      "status": "ok",
+      "url": "https://linkareer.com/activity/355927",
+      "error": null
+    }
+  ],
+  "candidates": [
+    {
+      "source": "linkareer",
+      "sourceId": "355927",
+      "sourceUrl": "https://linkareer.com/activity/355927",
+      "title": "2026 AI 플랫폼 구축 경진대회",
+      "organizer": "데이콘 주식회사",
+      "officialUrl": "https://daker.ai/public/hackathons/ai-platform-build-challenge-prelims",
+      "status": "open",
+      "eligibility": "eligible",
+      "aiEvidence": { "kind": "explicit", "text": "AI 플랫폼 구축 경진대회" },
+      "milestones": [
+        {
+          "stage": "application_deadline",
+          "date": "2026-10-25",
+          "time": "17:00",
+          "endDate": null,
+          "confidence": "confirmed",
+          "conditional": false,
+          "evidence": "공개 상세 공고의 참가 신청 마감 2026-10-25 17:00. 기획서 제출 마감과 별도 단계."
+        },
+        {
+          "stage": "submission_deadline",
+          "date": "2026-10-25",
+          "time": "23:59",
+          "endDate": null,
+          "confidence": "confirmed",
+          "conditional": false,
+          "evidence": "공개 상세 공고의 예선 기획서 제출 마감 2026-10-25 23:59."
+        }
+      ]
+    }
+  ]
+}

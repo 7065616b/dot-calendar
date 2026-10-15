@@ -1185,7 +1185,7 @@ fn valid_recurrence(value: Option<&str>) -> Result<Option<&str>, String> {
     }
 }
 
-fn valid_reminder(value: Option<u32>) -> Result<(), String> {
+pub(crate) fn valid_reminder(value: Option<u32>) -> Result<(), String> {
     if value.is_some_and(|minutes| minutes > 525_600) {
         return Err("reminder cannot exceed one year (525600 minutes)".into());
     }

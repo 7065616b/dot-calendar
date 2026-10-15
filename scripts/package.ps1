@@ -87,8 +87,7 @@ try {
             if (-not [string]::Equals($actual, $ExePath, [StringComparison]::OrdinalIgnoreCase)) {
                 throw "Refusing to stop unrelated process $($process.Id): $actual"
             }
-            $process.Kill()
-            [void]$process.WaitForExit(5000)
+            throw 'Version probe did not exit after input closed; no forced termination was attempted.'
         }
     } finally { $process.Dispose() }
 }
@@ -98,11 +97,16 @@ $payload = Join-Path $stage 'payload'
 Copy-Item -LiteralPath $ExePath -Destination (Join-Path $payload 'dot-calendar.exe')
 $files = @(
     'README.md', 'LICENSE', 'CONTRIBUTING.md', 'THIRD_PARTY_NOTICES.md',
-    'integration\README.md', 'integration\google.md',
+    'integration\README.md', 'integration\google.md', 'integration\ai-connection.md',
+    'integration\contest-collector.md', 'integration\contest-collector.example.json',
     'integration\dot-calendar\SKILL.md',
     'integration\dot-calendar\agents\openai.yaml',
     'integration\dot-calendar\scripts\invoke-calendar.ps1',
-    'scripts\install-dot-skill.ps1'
+    'scripts\install-dot-skill.ps1', 'scripts\collect-contests.ps1', 'scripts\run-contest-startup.ps1',
+    'scripts\contest-collector\ContestPaths.psm1',
+    'scripts\contest-collector\ContestConnection.psm1', 'scripts\contest-collector\ContestSources.psm1',
+    'scripts\contest-collector\ContestExtract.psm1', 'scripts\contest-collector\ContestNormalize.psm1',
+    'scripts\contest-collector\ContestImport.psm1', 'scripts\contest-collector\ContestSchedule.psm1'
 )
 if (Test-Path -LiteralPath (Join-Path $root 'resources\app.manifest') -PathType Leaf) {
     $files += 'resources\app.manifest'
@@ -179,12 +183,18 @@ $quickstart = @'
 Dot Calendar portable preview
 
 1. Extract this entire ZIP, then run dot-calendar.exe to open the desktop widget.
-2. Click Dot in the calendar. Local integration is prepared automatically.
-3. Copy the one-time introduction from that panel and send it to Your dot.
-   After that, use short requests such as "Add a meeting tomorrow at 3 PM."
+2. Click AI 연결 in the calendar and select the preparation you need.
+3. Copy a briefing for a web chat, or review the manual MCP JSON for a supported
+   desktop/CLI client. The separate local-skill button prepares the existing Dot
+   integration. Verify actual tool access before requesting calendar operations.
 
 The setup.exe download handles installation and connection preparation together.
 Your PC must be connected to Your dot and online with the ChatGPT app open.
+
+Daily contest collection is opt-in through a reviewed contest-startup.json and
+requires an existing PowerShell 7 runtime. See integration/contest-collector.md.
+No collector runs without that local configuration; source restrictions and
+uncertain eligibility/dates remain recorded errors or review items.
 
 Google Calendar is optional and requires your own Desktop OAuth client ID in
 the widget settings. This ZIP does not contain account credentials or events.

@@ -101,11 +101,35 @@ struct Totals {
 }
 
 pub fn load_config() -> Result<GoogleConfig, String> {
-    let path = data_dir()?.join("google-config.json");
-    if !path.exists() {
-        return Ok(GoogleConfig::default());
+    load_config_from(&data_dir()?)
+}
+
+fn read_optional_settings(path: &Path) -> Result<Option<Vec<u8>>, String> {
+    use std::os::windows::fs::MetadataExt;
+    for ancestor in path.ancestors() {
+        match fs::symlink_metadata(ancestor) {
+            Ok(metadata) if metadata.file_attributes() & 0x400 != 0 => {
+                return Err(format!(
+                    "Google settings path is redirected: {}",
+                    ancestor.display()
+                ));
+            }
+            Ok(_) => (),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
+            Err(e) => return Err(format!("Cannot inspect Google settings: {e}")),
+        }
     }
-    let bytes = fs::read(path).map_err(|e| e.to_string())?;
+    match fs::read(path) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!("Cannot read Google settings: {e}")),
+    }
+}
+
+fn load_config_from(directory: &Path) -> Result<GoogleConfig, String> {
+    let Some(bytes) = read_optional_settings(&directory.join("google-config.json"))? else {
+        return Ok(GoogleConfig::default());
+    };
     serde_json::from_slice(&bytes).map_err(|e| format!("Google settings are invalid: {e}"))
 }
 
@@ -119,17 +143,19 @@ pub fn save_config(config: &GoogleConfig) -> Result<(), String> {
 }
 
 pub fn is_connected() -> Result<bool, String> {
-    // A storage-resolution error must not look like a disconnected account.
-    // Keep the existing config/token validity behavior once the path is known.
-    let _data_directory = crate::data_paths::directory()?;
-    let Ok(config) = load_config() else {
-        return Ok(false);
-    };
+    connection_status(&crate::data_paths::directory()?)
+}
+
+fn connection_status(directory: &Path) -> Result<bool, String> {
+    let config = load_config_from(directory)?;
     if config.client_id.is_empty() {
         return Ok(false);
     }
-    Ok(load_tokens()
-        .is_ok_and(|tokens| config.client_id == tokens.client_id && !tokens.account_id.is_empty()))
+    let Some(bytes) = read_optional_settings(&directory.join("google-tokens.dpapi"))? else {
+        return Ok(false);
+    };
+    let tokens = decode_tokens(&bytes)?;
+    Ok(config.client_id == tokens.client_id && !tokens.account_id.is_empty())
 }
 
 /// Forget local credentials. Mappings remain for a safe reconnect to the same account.
@@ -447,9 +473,13 @@ fn save_tokens(tokens: &Tokens) -> Result<(), String> {
 }
 
 fn load_tokens() -> Result<Tokens, String> {
-    let bytes = fs::read(data_dir()?.join("google-tokens.dpapi"))
-        .map_err(|_| "Google Calendar is not connected; use Connect in settings".to_owned())?;
-    serde_json::from_slice(&dpapi(&bytes, false)?)
+    let bytes = read_optional_settings(&data_dir()?.join("google-tokens.dpapi"))?
+        .ok_or("Google Calendar is not connected; use Connect in settings")?;
+    decode_tokens(&bytes)
+}
+
+fn decode_tokens(bytes: &[u8]) -> Result<Tokens, String> {
+    serde_json::from_slice(&dpapi(bytes, false)?)
         .map_err(|e| format!("Protected Google token is invalid: {e}"))
 }
 
@@ -1525,6 +1555,58 @@ pub fn sync(store: &Store, config: &GoogleConfig) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn connection_status_distinguishes_missing_empty_corrupt_and_locked_settings() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let mut nonce = [0u8; 8];
+        getrandom::getrandom(&mut nonce).unwrap();
+        let root = std::env::temp_dir().join(format!(
+            "dot-google-status-{:016x}",
+            u64::from_le_bytes(nonce)
+        ));
+        fs::create_dir(&root).unwrap();
+        let config = root.join("google-config.json");
+        let token = root.join("google-tokens.dpapi");
+        assert!(!connection_status(&root).unwrap());
+        fs::write(&token, b"invalid encrypted token").unwrap();
+        assert!(!connection_status(&root).unwrap());
+        fs::write(&config, br#"{"client_id":""}"#).unwrap();
+        assert!(!connection_status(&root).unwrap());
+        fs::write(&config, b"{broken").unwrap();
+        assert!(connection_status(&root).unwrap_err().contains("invalid"));
+        fs::write(&config, br#"{"client_id":42}"#).unwrap();
+        assert!(connection_status(&root).is_err());
+        fs::write(&config, br#"{"client_id":"fixture"}"#).unwrap();
+        assert!(connection_status(&root).is_err());
+        fs::remove_file(&token).unwrap();
+        assert!(!connection_status(&root).unwrap());
+        let held = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&config)
+            .unwrap();
+        assert!(connection_status(&root)
+            .unwrap_err()
+            .contains("Cannot read"));
+        drop(held);
+        assert_eq!(fs::read(&config).unwrap(), br#"{"client_id":"fixture"}"#);
+        fs::remove_file(&config).unwrap();
+        fs::remove_dir(&root).unwrap();
+    }
+
+    #[test]
+    fn google_reminder_limit_is_enforced_without_mutating_local_values() {
+        let mut value = event();
+        value.reminder_minutes = Some(40_320);
+        assert!(export_event(&value, &HashMap::new()).is_ok());
+        value.reminder_minutes = Some(40_321);
+        let original = value.clone();
+        assert!(export_event(&value, &HashMap::new())
+            .unwrap_err()
+            .contains("4-week"));
+        assert_eq!(value, original);
+    }
 
     #[test]
     fn fingerprints_preserve_canonical_bytes_and_existing_hashes() {
